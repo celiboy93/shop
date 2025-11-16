@@ -15,8 +15,8 @@ interface User {
 interface Transaction {
     type: "topup" | "purchase";
     amount: number;
-    timestamp: string; // Stored in UTC
-    itemName?: string; // Store the item name for purchases
+    timestamp: string; 
+    itemName?: string; 
 }
 interface Product {
     id: string; 
@@ -78,6 +78,48 @@ async function resetUserPassword(username: string, newPasswordHash: string): Pro
     const res = await kv.atomic().check(result).set(key, user).commit();
     return res.ok;
 }
+
+// NEW: Function to transfer balance between users
+async function transferBalance(senderUsername: string, recipientUsername: string, amount: number): Promise<string> {
+    if (senderUsername === recipientUsername) return "Cannot send money to yourself.";
+    if (amount <= 0) return "Amount must be positive.";
+    
+    const senderKey = ["users", senderUsername];
+    const recipientKey = ["users", recipientUsername];
+
+    while (true) {
+        const [senderResult, recipientResult] = await kv.getMany<[User, User]>([senderKey, recipientKey]);
+
+        if (!senderResult.value) return "Sender not found."; // Should not happen
+        if (!recipientResult.value) return "Recipient user not found.";
+
+        const sender = senderResult.value;
+        const recipient = recipientResult.value;
+
+        if (sender.balance < amount) {
+            return `Insufficient balance. You only have ${formatCurrency(sender.balance)} Ks.`;
+        }
+
+        const newSenderBalance = sender.balance - amount;
+        const newRecipientBalance = recipient.balance + amount;
+        
+        const res = await kv.atomic()
+            .check(senderResult) 
+            .check(recipientResult) 
+            .set(senderKey, { ...sender, balance: newSenderBalance })
+            .set(recipientKey, { ...recipient, balance: newRecipientBalance })
+            .commit();
+        
+        if (res.ok) {
+            // Log transactions for both
+            await logTransaction(senderUsername, -amount, "purchase", `Transfer to ${recipientUsername}`);
+            await logTransaction(recipientUsername, amount, "topup", `Transfer from ${senderUsername}`);
+            return "success"; // Success!
+        }
+        // If !res.ok, a race condition happened. Loop will retry.
+    }
+}
+
 
 async function logTransaction(username: string, amount: number, type: "topup" | "purchase", itemName?: string): Promise<void> {
     const timestamp = new Date().toISOString(); 
@@ -404,22 +446,25 @@ async function handleUserInfoPage(req: Request, username: string): Promise<Respo
 
     const transactions = await getTransactions(username);
     
-    // Check for redeem messages
+    // Check for redeem/transfer messages
     const url = new URL(req.url);
     const message = url.searchParams.get("message");
     const error = url.searchParams.get("error");
     const value = url.searchParams.get("value");
+    const recipient = url.searchParams.get("recipient");
 
     let messageHtml = "";
     if (message === "redeem_success") {
         messageHtml = `<div class="success-msg">Success! ${formatCurrency(parseInt(value || "0"))} Ks was added to your balance.</div>`;
     }
-    if (error === "invalid_code" || error === "used_code" || error === "try_again") {
-        let errorText = "That voucher code is not valid.";
-        if (error === "used_code") errorText = "That voucher code has already been used.";
-        if (error === "try_again") errorText = "Redemption failed. Please try again.";
-        messageHtml = `<div class="error" style="margin-top: 15px;">${errorText}</div>`;
+    if (message === "transfer_success") {
+        messageHtml = `<div class="success-msg">Success! You sent ${formatCurrency(parseInt(value || "0"))} Ks to ${recipient}.</div>`;
     }
+    if (error) {
+        // Decode error message from URL
+        messageHtml = `<div class="error" style="margin-top: 15px;">${decodeURIComponent(error)}</div>`;
+    }
+
 
     function toMyanmarTime(utcString: string): string {
         try { return new Date(utcString).toLocaleString("en-US", { timeZone: MYANMAR_TIMEZONE, hour12: true }); } 
@@ -427,10 +472,10 @@ async function handleUserInfoPage(req: Request, username: string): Promise<Respo
     }
 
     const topUpHistory = transactions.filter(t => t.type === 'topup')
-        .map(t => `<li class="topup"><span><strong>${t.itemName || 'Top Up'}</strong> <strong>${formatCurrency(t.amount)} Ks</strong></span><span class="time">${toMyanmarTime(t.timestamp)}</span></li>`).join('');
+        .map(t => `<li class="topup"><span><strong>${t.itemName || 'Top Up'}</strong> <strong>+${formatCurrency(t.amount)} Ks</strong></span><span class="time">${toMyanmarTime(t.timestamp)}</span></li>`).join('');
     
     const purchaseHistory = transactions.filter(t => t.type === 'purchase')
-        .map(t => `<li class="purchase"><span>Bought <strong>${t.itemName || 'an item'}</strong> for <strong>${formatCurrency(Math.abs(t.amount))} Ks</strong></span><span class="time">${toMyanmarTime(t.timestamp)}</span></li>`)
+        .map(t => `<li class="purchase"><span>${t.itemName.includes('Transfer to') ? t.itemName : `Bought <strong>${t.itemName || 'an item'}</strong>`} for <strong>${formatCurrency(Math.abs(t.amount))} Ks</strong></span><span class="time">${toMyanmarTime(t.timestamp)}</span></li>`)
         .join('');
 
     const html = `
@@ -441,16 +486,15 @@ async function handleUserInfoPage(req: Request, username: string): Promise<Respo
             .avatar { width: 60px; height: 60px; border-radius: 50%; background-color: #eee; margin-right: 15px; display: flex; justify-content: center; align-items: center; overflow: hidden; }
             .avatar svg { width: 32px; height: 32px; color: #aaa; }
             .profile-info { flex-grow: 1; }
-            /* FIXED: Alignment */
-            .profile-grid { display: grid; grid-template-columns: 90px auto; align-items: center; } /* 90px label, auto value */
-            .profile-label { font-size: 1.2em; font-weight: 600; color: #333; }
-            .profile-name { font-size: 1.2em; color: #555; }
-            .profile-balance { font-size: 1.2em; color: #007bff; font-weight: 700; }
+            .profile-name { font-size: 1.8em; font-weight: 600; color: #333; margin: 0; }
+            .profile-subtext { font-size: 1.1em; color: #555; }
             
-            /* NEW Redeem Form */
-            .redeem-form { margin-bottom: 25px; }
-            .redeem-form input { width: 70%; }
-            .redeem-form button { width: auto; background-color: #17a2b8; }
+            /* NEW Form */
+            .form-box { margin-bottom: 25px; background: #f9f9f9; padding: 20px; border-radius: 8px; }
+            .form-box h2 { margin-top: 0; }
+            .form-box input { width: 90%; }
+            .form-box button { width: auto; background-color: #17a2b8; }
+            .form-box button.transfer { background-color: #fd7e14; }
             
             .history { margin-top: 25px; }
             .history h2 { border-bottom: 1px solid #eee; padding-bottom: 5px; }
@@ -471,30 +515,36 @@ async function handleUserInfoPage(req: Request, username: string): Promise<Respo
                 </svg>
             </div>
             <div class="profile-info">
-                <div class="profile-grid">
-                    <span class="profile-label">Username:</span> <span class="profile-name">${user.username}</span>
-                    <span class="profile-label">Balance:</span> <span class="profile-balance">${formatCurrency(user.balance)} Ks</span>
-                </div>
+                <h1 class="profile-name">${user.username}</h1>
+                <span class="profile-subtext">(Your Account Info)</span>
             </div>
         </div>
         <p style="font-size:0.9em; color:gray; text-align: center;">(For security, passwords are never shown.)</p>
         
-        <div class="redeem-form">
+        ${messageHtml} <div class="form-box">
             <h2>Redeem Voucher</h2>
             <form action="/redeem_voucher" method="POST" style="display: flex; gap: 10px;">
                 <input type="text" id="code" name="code" required style="text-transform: uppercase; margin: 0; flex: 1;" placeholder="Enter code">
                 <button type="submit" class="redeem">Redeem</button>
             </form>
-            ${messageHtml} </div>
+        </div>
+        
+        <div class="form-box">
+            <h2>Transfer Funds</h2>
+            <form action="/transfer_funds" method="POST">
+                <label>Recipient's Name:</label>
+                <input type="text" name="recipient_name" required style="width: 95%;">
+                <label style="margin-top: 10px; display: block;">Amount (Ks):</label>
+                <input type="number" name="transfer_amount" required style="width: 95%;">
+                <button type="submit" class="transfer" style="width: 100%; margin-top: 15px;">Send Money</button>
+            </form>
+        </div>
 
         <div class="history">
-            <h2>Top-Up History</h2>
-            <div class="history-list"> ${topUpHistory.length > 0 ? `<ul>${topUpHistory}</ul>` : '<p>You have not received any top-ups yet.</p>'}
-            </div>
-        </div>
-        <div class="history">
-            <h2>Purchase History</h2>
-            <div class="history-list"> ${purchaseHistory.length > 0 ? `<ul>${purchaseHistory}</ul>` : '<p>You have not made any purchases yet.</p>'}
+            <h2>Transaction History</h2>
+            <div class="history-list"> ${topUpHistory.length > 0 ? `<ul>${topUpHistory}</ul>` : ''}
+                ${purchaseHistory.length > 0 ? `<ul>${purchaseHistory}</ul>` : ''}
+                ${topUpHistory.length === 0 && purchaseHistory.length === 0 ? '<p>No transactions yet.</p>' : ''}
             </div>
         </div>
         
@@ -535,7 +585,7 @@ async function handleRegister(formData: FormData): Promise<Response> {
     const password = formData.get("password")?.toString();
     const remember = formData.get("remember") === "on";
 
-    if (!username || !password) return new Response("Missing username or password.", { status 400 });
+    if (!username || !password) return new Response("Missing username or password.", { status: 400 });
 
     const passwordHash = password; 
     const success = await registerUser(username, passwordHash);
@@ -711,6 +761,32 @@ async function handleRedeemVoucher(formData: FormData, username: string): Promis
     return new Response("Redirecting...", { status: 302, headers });
 }
 
+// NEW: Handler for User-to-User Transfer
+async function handleTransfer(formData: FormData, username: string): Promise<Response> {
+    const recipientName = formData.get("recipient_name")?.toString();
+    const amountStr = formData.get("transfer_amount")?.toString();
+    const amount = amountStr ? parseInt(amountStr) : NaN;
+    
+    const headers = new Headers();
+
+    if (!recipientName || isNaN(amount) || amount <= 0) {
+        headers.set("Location", `/user-info?error=${encodeURIComponent("Invalid name or amount.")}`);
+        return new Response("Redirecting...", { status: 302, headers });
+    }
+
+    const result = await transferBalance(username, recipientName, amount);
+
+    if (result === "success") {
+        headers.set("Location", `/user-info?message=transfer_success&value=${amount}&recipient=${recipientName}`);
+        return new Response("Redirecting...", { status: 302, headers });
+    } else {
+        // Pass the specific error message from the logic
+        headers.set("Location", `/user-info?error=${encodeURIComponent(result)}`);
+        return new Response("Redirecting...", { status: 302, headers });
+    }
+}
+
+
 async function handleCreateVoucher(formData: FormData): Promise<Response> {
     const amountStr = formData.get("amount")?.toString();
     const amount = amountStr ? parseInt(amountStr) : NaN;
@@ -792,6 +868,7 @@ async function handler(req: Request): Promise<Response> {
         
         if (pathname === "/buy") return await handleBuy(formData, username);
         if (pathname === "/redeem_voucher") return await handleRedeemVoucher(formData, username); 
+        if (pathname === "/transfer_funds") return await handleTransfer(formData, username); // NEW
 
         // Admin POST (Protected)
         const token = formData.get("token")?.toString();
