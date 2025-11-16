@@ -20,14 +20,6 @@ interface Transaction {
     itemName?: string; 
     itemDetails?: string; 
 }
-// NEW: For admin sales history
-interface DigitalSaleLog {
-    username: string;
-    itemName?: string;
-    itemDetails?: string;
-    timestamp: string;
-    amount: number;
-}
 interface Product {
     id: string; 
     name: string; 
@@ -385,7 +377,6 @@ function renderRegisterForm(req: Request): Response {
     return new Response(html, { headers: HTML_HEADERS });
 }
 
-// UPDATED: Admin Panel now includes Digital Sales History
 async function renderAdminPanel(token: string, message: string | null): Promise<Response> {
     let messageHtml = "";
     if (message) messageHtml = `<div class="success-msg">${decodeURIComponent(message)}</div>`;
@@ -413,7 +404,6 @@ async function renderAdminPanel(token: string, message: string | null): Promise<
     
     const currentAnnouncement = await getAnnouncement() || "";
     
-    // NEW: Get Sales History
     const salesHistory = await getDigitalSalesHistory();
     const salesHistoryHtml = salesHistory.map(s => `
         <div class="voucher-item">
@@ -469,7 +459,7 @@ async function renderAdminPanel(token: string, message: string | null): Promise<
             </form><br>
             <form action="/admin/reset_password" method="POST"><input type="hidden" name="token" value="${token}"><label>User Name (for Reset):</label><input type="text" name="name" required><br><br><label>New Password:</label><input type="text" name="new_password" required><br><br><button type="submit" class="reset">Reset Password</button></form><br>
             <form action="/admin/toggle_block" method="POST"><input type="hidden" name="token" value="${token}"><label>User Name (to Block/Unblock):</label><input type="text" name="name" required><br><br><button type="submit" style="background-color:#555;">Toggle Block Status</button></form><hr>
-
+            
             <h2>Digital Sales History</h2>
             <div class="history-list">
                 ${salesHistoryHtml.length > 0 ? salesHistoryHtml : '<p>No digital items sold yet.</p>'}
@@ -621,11 +611,6 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
     if (message === "transfer_success") messageHtml = `<div class="success-msg">Success! You sent ${formatCurrency(parseInt(value || "0"))} Ks to ${recipient}.</div>`;
     if (error) messageHtml = `<div class="error" style="margin-top: 15px;">${decodeURIComponent(error)}</div>`;
 
-    function toMyanmarTime(utcString: string): string {
-        try { return new Date(utcString).toLocaleString("en-US", { timeZone: MYANMAR_TIMEZONE, hour12: true }); } 
-        catch (e) { return utcString; }
-    }
-
     const allPurchases = transactions.filter(t => t.type === 'purchase');
     const digitalPurchases = allPurchases.filter(t => t.itemDetails);
     const normalPurchases = allPurchases.filter(t => !t.itemDetails);
@@ -659,14 +644,15 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
     const html = `
         <!DOCTYPE html><html lang="my"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>My Info</title>
         <style>${globalStyles}
+            /* Profile Header */
             .profile-header { display: flex; align-items: center; margin-bottom: 20px; }
             .avatar { width: 60px; height: 60px; border-radius: 50%; background-color: #eee; margin-right: 15px; display: flex; justify-content: center; align-items: center; overflow: hidden; }
             .avatar svg { width: 32px; height: 32px; color: #aaa; }
-            /* FIXED: Alignment */
-            .profile-info { display: flex; align-items: center; gap: 10px; } 
-            .profile-name { font-size: 1.8em; font-weight: 600; color: #333; margin: 0; user-select: all; }
-            .copy-btn-small { background: #007bff; color: white; border: none; padding: 5px 10px; font-size: 12px; border-radius: 5px; cursor: pointer; }
+            .profile-info { flex-grow: 1; display: flex; align-items: baseline; gap: 10px; } 
+            .profile-name { font-size: 1.8em; font-weight: 600; color: #333; margin: 0; user-select: all; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            .copy-btn-small { background: #007bff; color: white; border: none; padding: 5px 10px; font-size: 12px; border-radius: 5px; cursor: pointer; flex-shrink: 0; }
             
+            /* Form Box */
             .form-box { margin-bottom: 25px; background: #f9f9f9; padding: 20px; border-radius: 8px; }
             .form-box h2 { margin-top: 0; }
             .form-box input { width: 90%; }
@@ -702,10 +688,8 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A1.875 1.875 0 0 1 18 22.5H6c-.98 0-1.813-.73-1.93-1.703a1.875 1.875 0 0 1 .03-1.179Z" /></svg>
             </div>
             <div class="profile-info">
-                <div style="display: flex; align-items: center; gap: 10px;">
-                    <h1 class="profile-name" id="username-text">${user.username}</h1>
-                    <button class="copy-btn-small" onclick="copyToClipboard('username-text', this)">Copy</button>
-                </div>
+                <h1 class="profile-name" id="username-text">${user.username}</h1>
+                <button class="copy-btn-small" onclick="copyToClipboard('username-text', this)">Copy</button>
             </div>
         </div>
         
