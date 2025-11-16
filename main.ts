@@ -442,8 +442,10 @@ async function handleUserInfoPage(req: Request, username: string): Promise<Respo
             .avatar svg { width: 32px; height: 32px; color: #aaa; }
             .profile-info { flex-grow: 1; }
             /* FIXED: Alignment */
-            .profile-name { font-size: 1.5em; font-weight: 600; color: #333; margin: 0; }
-            .profile-balance { font-size: 1.2em; color: #007bff; font-weight: 500; margin: 0; }
+            .profile-grid { display: grid; grid-template-columns: 90px auto; align-items: center; } /* 90px label, auto value */
+            .profile-label { font-size: 1.2em; font-weight: 600; color: #333; }
+            .profile-name { font-size: 1.2em; color: #555; }
+            .profile-balance { font-size: 1.2em; color: #007bff; font-weight: 700; }
             
             /* NEW Redeem Form */
             .redeem-form { margin-bottom: 25px; }
@@ -452,14 +454,8 @@ async function handleUserInfoPage(req: Request, username: string): Promise<Respo
             
             .history { margin-top: 25px; }
             .history h2 { border-bottom: 1px solid #eee; padding-bottom: 5px; }
-            .history-list { /* NEW SCROLL BOX */
-                max-height: 300px;
-                overflow-y: auto;
-                background-color: #fcfcfc;
-                border: 1px solid #eee;
-                padding: 10px;
-                border-radius: 8px;
-            }
+            /* NEW SCROLL BOX */
+            .history-list { max-height: 250px; overflow-y: auto; background-color: #fcfcfc; border: 1px solid #eee; padding: 10px; border-radius: 8px; }
             .history ul { padding-left: 0; list-style-type: none; margin: 0; }
             .history li { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; padding: 12px; background: #fff; border: 1px solid #eee; border-radius: 8px; border-left-width: 5px; }
             .history li.topup { border-left-color: #28a745; }
@@ -475,10 +471,13 @@ async function handleUserInfoPage(req: Request, username: string): Promise<Respo
                 </svg>
             </div>
             <div class="profile-info">
-                <h1 class="profile-name">${user.username}</h1>
-                <div class="profile-balance">${formatCurrency(user.balance)} Ks</div>
+                <div class="profile-grid">
+                    <span class="profile-label">Username:</span> <span class="profile-name">${user.username}</span>
+                    <span class="profile-label">Balance:</span> <span class="profile-balance">${formatCurrency(user.balance)} Ks</span>
+                </div>
             </div>
         </div>
+        <p style="font-size:0.9em; color:gray; text-align: center;">(For security, passwords are never shown.)</p>
         
         <div class="redeem-form">
             <h2>Redeem Voucher</h2>
@@ -536,7 +535,7 @@ async function handleRegister(formData: FormData): Promise<Response> {
     const password = formData.get("password")?.toString();
     const remember = formData.get("remember") === "on";
 
-    if (!username || !password) return new Response("Missing username or password.", { status: 400 });
+    if (!username || !password) return new Response("Missing username or password.", { status 400 });
 
     const passwordHash = password; 
     const success = await registerUser(username, passwordHash);
@@ -673,7 +672,6 @@ async function handleResetPassword(formData: FormData): Promise<Response> {
     }
 }
 
-// UPDATED: handleRedeemVoucher now redirects back to /user-info
 async function handleRedeemVoucher(formData: FormData, username: string): Promise<Response> {
     const code = formData.get("code")?.toString().toUpperCase();
     const headers = new Headers();
@@ -751,7 +749,6 @@ async function handler(req: Request): Promise<Response> {
         if (pathname === "/login") return renderLoginForm(req); 
         if (pathname === "/register") return renderRegisterForm(req); 
         if (pathname === "/logout") return handleLogout();
-        // REMOVED: /redeem GET route, it's now part of /user-info
 
         // Admin GET
         const token = url.searchParams.get("token");
