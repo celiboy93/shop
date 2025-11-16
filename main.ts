@@ -407,7 +407,6 @@ function renderRegisterForm(req: Request): Response {
     return new Response(html, { headers: HTML_HEADERS });
 }
 
-// UPDATED: Admin Panel now includes "Set Payment Info"
 async function renderAdminPanel(token: string, message: string | null): Promise<Response> {
     let messageHtml = "";
     if (message) messageHtml = `<div class="success-msg">${decodeURIComponent(message)}</div>`;
@@ -434,7 +433,7 @@ async function renderAdminPanel(token: string, message: string | null): Promise<
     `).join('');
     
     const currentAnnouncement = await getAnnouncement() || "";
-    const pInfo = await getPaymentInfo() || {}; // Get current payment info
+    const pInfo = await getPaymentInfo(); // Get current payment info
     
     const salesHistory = await getDigitalSalesHistory();
     const salesHistoryHtml = salesHistory.map(s => `
@@ -443,6 +442,7 @@ async function renderAdminPanel(token: string, message: string | null): Promise<
             <span class="voucher-value">${toMyanmarTime(s.timestamp)}</span>
         </div>
     `).join('');
+
 
     const html = `
         <!DOCTYPE html><html lang="my"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Admin Panel</title>
@@ -462,14 +462,14 @@ async function renderAdminPanel(token: string, message: string | null): Promise<
             <h2>Set Payment Info</h2>
             <form action="/admin/set_payment_info" method="POST">
                 <input type="hidden" name="token" value="${token}">
-                <label>Instructions:</label><textarea name="instructions" rows="3" style="width:95%;">${pInfo.instructions || 'Voucher Code ဝယ်ယူရန် (သို့) Admin မှ တိုက်ရိုက်ငွေဖြည့်ရန် Telegram မှ ဆက်သွယ်ပါ။'}</textarea><br><br>
-                <label>Telegram Username (no @):</label><input type="text" name="telegramUser" value="${pInfo.telegramUser || 'iqowoq'}"><br><br>
-                <label>KPay Logo URL:</label><input type="url" name="kpayLogoUrl" value="${pInfo.kpayLogoUrl || 'https://i2.qyimage.store:2999/i/2e0ca3029baf42b1'}"><br><br>
-                <label>KPay Number:</label><input type="text" name="kpayNumber" value="${pInfo.kpayNumber || '09961650283'}"><br><br>
-                <label>KPay Name:</label><input type="text" name="kpayName" value="${pInfo.kpayName || 'thein naing win'}"><br><br>
-                <label>Wave Pay Logo URL:</label><input type="url" name="waveLogoUrl" value="${pInfo.waveLogoUrl || 'https://i2.qyimage.store:2999/i/c139deae73934177'}"><br><br>
-                <label>Wave Pay Number:</label><input type="text" name="waveNumber" value="${pInfo.waveNumber || '09688171999'}"><br><br>
-                <label>Wave Pay Name:</label><input type="text" name="waveName" value="${pInfo.waveName || 'thein naing win'}"><br><br>
+                <label>Instructions:</label><textarea name="instructions" rows="3" style="width:95%;">${pInfo?.instructions || 'Voucher Code ဝယ်ယူရန် (သို့) Admin မှ တိုက်ရိုက်ငွေဖြည့်ရန် Telegram မှ ဆက်သွယ်ပါ။'}</textarea><br><br>
+                <label>Telegram Username (no @):</label><input type="text" name="telegramUser" value="${pInfo?.telegramUser || 'iqowoq'}"><br><br>
+                <label>KPay Logo URL:</label><input type="url" name="kpayLogoUrl" value="${pInfo?.kpayLogoUrl || 'https://i2.qyimage.store:2999/i/2e0ca3029baf42b1'}"><br><br>
+                <label>KPay Number:</label><input type="text" name="kpayNumber" value="${pInfo?.kpayNumber || '09961650283'}"><br><br>
+                <label>KPay Name:</label><input type="text" name="kpayName" value="${pInfo?.kpayName || 'thein naing win'}"><br><br>
+                <label>Wave Pay Logo URL:</label><input type="url" name="waveLogoUrl" value="${pInfo?.waveLogoUrl || 'https://i2.qyimage.store:2999/i/c139deae73934177'}"><br><br>
+                <label>Wave Pay Number:</label><input type="text" name="waveNumber" value="${pInfo?.waveNumber || '09688171999'}"><br><br>
+                <label>Wave Pay Name:</label><input type="text" name="waveName" value="${pInfo?.waveName || 'thein naing win'}"><br><br>
                 <button type="submit" class="payment">Update Payment Info</button>
             </form><hr>
 
@@ -703,14 +703,14 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
                 </a>
                 <hr style="border:0; border-top:1px solid #eee; margin: 15px 0;">
                 <div class="payment-account">
-                    <strong><img src="${paymentInfo.kpayLogoUrl}" height="20" alt="KPay"></strong>
+                    <strong><img src="${paymentInfo.kpayLogoUrl}" class="logo" alt="KPay"></strong>
                     <div class="details">
                         <span class="number">${paymentInfo.kpayNumber}</span>
                         <span class="name">${paymentInfo.kpayName}</span>
                     </div>
                 </div>
                 <div class="payment-account">
-                    <strong><img src="${paymentInfo.waveLogoUrl}" height="20" alt="WavePay"></strong>
+                    <strong><img src="${paymentInfo.waveLogoUrl}" class="logo" alt="WavePay"></strong>
                     <div class="details">
                         <span class="number">${paymentInfo.waveNumber}</span>
                         <span class="name">${paymentInfo.waveName}</span>
@@ -724,6 +724,7 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
     const html = `
         <!DOCTYPE html><html lang="my"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>My Info</title>
         <style>${globalStyles}
+            /* Profile Header */
             .profile-header { display: flex; align-items: center; margin-bottom: 20px; }
             .avatar { width: 60px; height: 60px; border-radius: 50%; background-color: #eee; margin-right: 15px; display: flex; justify-content: center; align-items: center; overflow: hidden; }
             .avatar svg { width: 32px; height: 32px; color: #aaa; }
@@ -732,6 +733,7 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
             .profile-name { font-size: 1.8em; font-weight: 600; color: #333; margin: 0; user-select: all; }
             .copy-btn-small { background: #007bff; color: white; border: none; padding: 5px 10px; font-size: 12px; border-radius: 5px; cursor: pointer; margin-top: 5px; width: auto; }
             
+            /* Form Box */
             .form-box { margin-bottom: 25px; background: #f9f9f9; padding: 20px; border-radius: 8px; }
             .form-box h2 { margin-top: 0; }
             .form-box input { width: 90%; }
@@ -752,9 +754,9 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
             .payment-info { background: #fffbe6; border: 1px solid #ffeeba; border-radius: 8px; padding: 20px; }
             .payment-info h2 { margin-top: 0; }
             .payment-list { padding-left: 0; list-style: none; margin-top: 15px; }
-            .payment-account { display: grid; grid-template-columns: 100px auto; align-items: center; margin-bottom: 12px; font-size: 1.1em; }
-            .payment-account strong { font-weight: 600; color: #333; }
-            .payment-account strong img { height: 25px; vertical-align: middle; }
+            /* FIXED: Alignment for Payment */
+            .payment-account { display: grid; grid-template-columns: 80px auto; /* 80px logo */ align-items: center; margin-bottom: 12px; font-size: 1.1em; }
+            .payment-account .logo { height: 25px; width: auto; }
             .payment-account .details { display: flex; flex-direction: column; }
             .payment-account .number { font-weight: 600; color: #0056b3; }
             .payment-account .name { font-size: 0.9em; color: #555; }
@@ -1171,6 +1173,27 @@ async function handleSetAnnouncement(formData: FormData): Promise<Response> {
     return new Response("Redirecting...", { status: 302, headers });
 }
 
+// NEW: Handler for setting payment info
+async function handleSetPaymentInfo(formData: FormData): Promise<Response> {
+    const token = formData.get("token")?.toString();
+    const info: PaymentInfo = {
+        instructions: formData.get("instructions")?.toString() || "",
+        telegramUser: formData.get("telegramUser")?.toString() || "",
+        kpayLogoUrl: formData.get("kpayLogoUrl")?.toString() || "",
+        kpayNumber: formData.get("kpayNumber")?.toString() || "",
+        kpayName: formData.get("kpayName")?.toString() || "",
+        waveLogoUrl: formData.get("waveLogoUrl")?.toString() || "",
+        waveNumber: formData.get("waveNumber")?.toString() || "",
+        waveName: formData.get("waveName")?.toString() || "",
+    };
+
+    await setPaymentInfo(info);
+    
+    const headers = new Headers();
+    headers.set("Location", `/admin/panel?token=${token}&message=${encodeURIComponent("Payment info updated!")}`);
+    return new Response("Redirecting...", { status: 302, headers });
+}
+
 
 function handleLogout(): Response {
     const headers = new Headers();
@@ -1267,6 +1290,7 @@ async function handler(req: Request): Promise<Response> {
         if (pathname === "/admin/create_voucher") return await handleCreateVoucher(formData); 
         if (pathname === "/admin/set_announcement") return await handleSetAnnouncement(formData); 
         if (pathname === "/admin/toggle_block") return await handleToggleBlock(formData);
+        if (pathname === "/admin/set_payment_info") return await handleSetPaymentInfo(formData); // NEW
     }
 
     // --- Default Route (Redirect all other requests to login) ---
