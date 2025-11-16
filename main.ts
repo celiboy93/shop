@@ -20,6 +20,14 @@ interface Transaction {
     itemName?: string; 
     itemDetails?: string; 
 }
+// NEW: For admin sales history
+interface DigitalSaleLog {
+    username: string;
+    itemName?: string;
+    itemDetails?: string;
+    timestamp: string;
+    amount: number;
+}
 interface Product {
     id: string; 
     name: string; 
@@ -169,7 +177,7 @@ async function getTransactions(username: string): Promise<Transaction[]> {
     return transactions;
 }
 
-// NEW: Function to get all digital sales for Admin
+// Function to get all digital sales for Admin
 async function getDigitalSalesHistory(): Promise<DigitalSaleLog[]> {
     const entries = kv.list<Transaction>({ prefix: ["transactions"] });
     const logs: DigitalSaleLog[] = [];
@@ -177,7 +185,7 @@ async function getDigitalSalesHistory(): Promise<DigitalSaleLog[]> {
         const t = entry.value;
         if (t.type === 'purchase' && t.itemDetails) {
             logs.push({
-                username: entry.key[1] as string, // Get username from key
+                username: entry.key[1] as string, 
                 itemName: t.itemName,
                 itemDetails: t.itemDetails,
                 timestamp: t.timestamp,
@@ -185,7 +193,7 @@ async function getDigitalSalesHistory(): Promise<DigitalSaleLog[]> {
             });
         }
     }
-    return logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()); // Sort by most recent
+    return logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()); 
 }
 
 
@@ -650,8 +658,7 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
             .profile-header { display: flex; align-items: center; margin-bottom: 20px; }
             .avatar { width: 60px; height: 60px; border-radius: 50%; background-color: #eee; margin-right: 15px; display: flex; justify-content: center; align-items: center; overflow: hidden; }
             .avatar svg { width: 32px; height: 32px; color: #aaa; }
-            /* FIXED: Alignment */
-            .profile-info { display: flex; align-items: center; gap: 10px; } 
+            .profile-info { flex-grow: 1; display: flex; align-items: baseline; gap: 10px; } 
             .profile-name { font-size: 1.8em; font-weight: 600; color: #333; margin: 0; user-select: all; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
             .copy-btn-small { background: #007bff; color: white; border: none; padding: 5px 10px; font-size: 12px; border-radius: 5px; cursor: pointer; flex-shrink: 0; }
             
