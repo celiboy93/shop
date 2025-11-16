@@ -16,9 +16,10 @@ interface Transaction {
     type: "topup" | "purchase";
     amount: number;
     timestamp: string; // Stored in UTC
+    itemName?: string; // NEW: Store the item name for purchases
 }
 interface Product {
-    id: string; // e.g., "1678886400000"
+    id: string; 
     name: string; 
     price: number; 
     imageUrl: string; 
@@ -28,7 +29,6 @@ interface Product {
 // Core Helper Functions
 // ----------------------------------------------------
 
-// Helper to format numbers with commas
 function formatCurrency(amount: number): string {
     return amount.toLocaleString('en-US');
 }
@@ -57,16 +57,17 @@ async function updateUserBalance(username: string, amountChange: number): Promis
         const user = result.value;
         if (!user) return false; 
         const newBalance = user.balance + amountChange;
-        if (newBalance < 0) return false; // This prevents overdraft
+        if (newBalance < 0) return false; 
         const res = await kv.atomic().check(result).set(key, { ...user, balance: newBalance }).commit();
         if (res.ok) return true; 
     }
 }
 
-async function logTransaction(username: string, amount: number, type: "topup" | "purchase"): Promise<void> {
+// UPDATED: logTransaction now accepts itemName
+async function logTransaction(username: string, amount: number, type: "topup" | "purchase", itemName?: string): Promise<void> {
     const timestamp = new Date().toISOString(); 
     const key = ["transactions", username, timestamp]; 
-    const transaction: Transaction = { type, amount, timestamp };
+    const transaction: Transaction = { type, amount, timestamp, itemName }; // Save itemName
     await kv.set(key, transaction);
 }
 
@@ -86,7 +87,7 @@ async function getProducts(): Promise<Product[]> {
     for await (const entry of entries) {
         products.push(entry.value);
     }
-    return products.sort((a, b) => parseInt(a.id) - parseInt(b.id)); // Sort by time added
+    return products.sort((a, b) => parseInt(a.id) - parseInt(b.id)); 
 }
 
 async function getProductById(id: string): Promise<Product | null> {
@@ -146,6 +147,9 @@ function createSession(username: string): Headers {
 // HTML Render Functions (Pages)
 // ----------------------------------------------------
 
+// FIXED: Added charset=utf-8 to all responses
+const HTML_HEADERS = { "Content-Type": "text/html; charset=utf-8" };
+
 const globalStyles = `
     body { font-family: sans-serif; margin: 0; padding: 0; background-color: #f4f7f6; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
     .container { max-width: 600px; width: 90%; margin: 30px auto; padding: 30px; background-color: white; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
@@ -157,21 +161,21 @@ const globalStyles = `
 `;
 
 function renderLoginForm(): Response {
-    const html = `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>Login</title><style>${globalStyles}</style></head>
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Login</title><style>${globalStyles}</style></head>
         <body><div class="container"><h1>User Login</h1><form action="/auth" method="POST"><label for="username">Name:</label><br><input type="text" id="username" name="username" required><br><br><label for="password">Password:</label><br><input type="password" id="password" name="password" required><br><br><button type="submit">Log In</button></form>
         <p style="margin-top:20px;">Don't have an account? <a href="/register">Register Here</a></p></div></body></html>`;
-    return new Response(html, { headers: { "Content-Type": "text/html" } });
+    return new Response(html, { headers: HTML_HEADERS });
 }
 
 function renderRegisterForm(req: Request): Response {
     const url = new URL(req.url);
     const error = url.searchParams.get("error");
-    const html = `<!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>Register</title><style>${globalStyles} button.register{background-color:#28a745;}</style></head>
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Register</title><style>${globalStyles} button.register{background-color:#28a745;}</style></head>
         <body><div class="container"><h1>Create Account</h1>
         ${error === 'exists' ? '<p class="error">This username is already taken.</p>' : ''}
         <form action="/doregister" method="POST"><label for="username">Choose Name:</label><br><input type="text" id="username" name="username" required><br><br><label for="password">Choose Password:</label><br><input type="password" id="password" name="password" required><br><br><button type="submit" class="register">Create Account</button></form>
         <p style="margin-top:20px;">Already have an account? <a href="/login">Login</a></p></div></body></html>`;
-    return new Response(html, { headers: { "Content-Type": "text/html" } });
+    return new Response(html, { headers: HTML_HEADERS });
 }
 
 async function renderAdminPanel(token: string, message: string | null): Promise<Response> {
@@ -207,30 +211,13 @@ async function renderAdminPanel(token: string, message: string | null): Promise<
         </style></head>
         <body><div class="container">
             ${messageHtml}
-            
-            <h2>Product Management</h2>
-            <div class="product-list">${products.length > 0 ? productListHtml : '<p>No products yet.</p>'}</div>
-            
-            <hr>
+            <h2>Product Management</h2><div class="product-list">${products.length > 0 ? productListHtml : '<p>No products yet.</p>'}</div><hr>
             <h2>Add New Product</h2>
-            <form action="/admin/add_product" method="POST">
-                <input type="hidden" name="token" value="${token}">
-                <label>Product Name:</label><input type="text" name="name" required><br><br>
-                <label>Price (Ks):</label><input type="number" name="price" required><br><br>
-                <label>Image URL (or Emoji):</label><input type="url" name="imageUrl" required><br><br>
-                <button type="submit" class="product">Add Product</button>
-            </form>
-
-            <hr>
+            <form action="/admin/add_product" method="POST"><input type="hidden" name="token" value="${token}"><label>Product Name:</label><input type="text" name="name" required><br><br><label>Price (Ks):</label><input type="number" name="price" required><br><br><label>Image URL (or Emoji):</label><input type="url" name="imageUrl" required><br><br><button type="submit" class="product">Add Product</button></form><hr>
             <h2>User Top-Up</h2>
-            <form action="/admin/topup" method="POST">
-                <input type="hidden" name="token" value="${token}">
-                <label>User Name:</label><input type="text" name="name" required><br><br>
-                <label>Amount (Ks):</label><input type="number" name="amount" required><br><br>
-                <button type="submit" class="admin">Add Balance</button>
-            </form>
+            <form action="/admin/topup" method="POST"><input type="hidden" name="token" value="${token}"><label>User Name:</label><input type="text" name="name" required><br><br><label>Amount (Ks):</label><input type="number" name="amount" required><br><br><button type="submit" class="admin">Add Balance</button></form>
         </div></body></html>`;
-    return new Response(html, { headers: { "Content-Type": "text/html" } });
+    return new Response(html, { headers: HTML_HEADERS });
 }
 
 async function renderEditProductPage(token: string, product: Product): Promise<Response> {
@@ -239,44 +226,34 @@ async function renderEditProductPage(token: string, product: Product): Promise<R
         <body><div class="container">
             <h1>Edit Product</h1>
             <form action="/admin/update_product" method="POST">
-                <input type="hidden" name="token" value="${token}">
-                <input type="hidden" name="productId" value="${product.id}">
-                
-                <label>Product Name:</label>
-                <input type="text" name="name" required value="${product.name}"><br><br>
-                
-                <label>Price (Ks):</label>
-                <input type="number" name="price" required value="${product.price}"><br><br>
-                
-                <label>Image URL (or Emoji):</label>
-                <input type="url" name="imageUrl" required value="${product.imageUrl}"><br><br>
-                
+                <input type="hidden" name="token" value="${token}"><input type="hidden" name="productId" value="${product.id}">
+                <label>Product Name:</label><input type="text" name="name" required value="${product.name}"><br><br>
+                <label>Price (Ks):</label><input type="number" name="price" required value="${product.price}"><br><br>
+                <label>Image URL (or Emoji):</label><input type="url" name="imageUrl" required value="${product.imageUrl}"><br><br>
                 <button type="submit" class="product">Update Product</button>
-            </form>
-            <p><a href="/admin/panel?token=${token}">Cancel</a></p>
+            </form><p><a href="/admin/panel?token=${token}">Cancel</a></p>
         </div></body></html>`;
-    return new Response(html, { headers: { "Content-Type": "text/html" } });
+    return new Response(html, { headers: HTML_HEADERS });
 }
 
-// Helper to render styled message pages
+// UPDATED: Added <meta charset> and fixed headers
 function renderMessagePage(title: string, message: string, isError = false, backLink: string | null = null): Response {
     const borderColor = isError ? "#dc3545" : "#28a745";
     const linkHref = backLink || "/dashboard";
     const linkText = backLink === null ? "Back to Shop" : "Go Back";
 
-    const html = `<!DOCTYPE html><html><head><title>${title}</title><meta name="viewport" content="width=device-width, initial-scale=1"><style>${globalStyles} .container{text-align:center; border-top:5px solid ${borderColor};} .message{font-size:1.2em; color:${isError ? '#dc3545' : '#333'};}</style></head>
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${title}</title><meta name="viewport" content="width=device-width, initial-scale=1"><style>${globalStyles} .container{text-align:center; border-top:5px solid ${borderColor};} .message{font-size:1.2em; color:${isError ? '#dc3545' : '#333'};}</style></head>
         <body><div class="container"><h1>${title}</h1><p class="message">${message}</p><br><a href="${linkHref}">${linkText}</a></div></body></html>`;
-    return new Response(html, { status: isError ? 400 : 200, headers: { "Content-Type": "text/html" } });
+    
+    return new Response(html, { status: isError ? 400 : 200, headers: HTML_HEADERS });
 }
 
-// UPDATED: Dashboard now reads products from KV and formats numbers
 async function handleDashboard(username: string): Promise<Response> {
     const user = await getUserByUsername(username);
     if (!user) return handleLogout(); 
     
     const products = await getProducts();
     
-    // Dynamically create product cards
     const productListHtml = products.map(product => `
         <div class="item-card">
             <div class="item-info">
@@ -285,8 +262,7 @@ async function handleDashboard(username: string): Promise<Response> {
                 </h3>
             </div>
             <form method="POST" action="/buy" onsubmit="return checkBalance('${product.name}', ${product.price}, ${user.balance});">
-                <input type="hidden" name="item" value="${product.name}">
-                <input type="hidden" name="price" value="${product.price}">
+                <input type="hidden" name="item" value="${product.name}"><input type="hidden" name="price" value="${product.price}">
                 <button type="submit" class="buy-btn">Buy Now</button>
             </form>
         </div>
@@ -299,29 +275,25 @@ async function handleDashboard(username: string): Promise<Response> {
         <body><div class="container"><h1>Welcome, ${user.username}!</h1>
         <div class="balance-box"><span>Current Balance:</span><div class="balance-amount">${formatCurrency(user.balance)} Ks</div></div>
         <h2>🛒 Shop Items:</h2>
-        
         ${products.length > 0 ? productListHtml : '<p>No products available yet. Check back soon!</p>'}
-        
         <div class="nav-links"><a href="/user-info">My Info</a><a href="/logout" style="color:red;">Logout</a></div></div>
-        
         <script>
             function checkBalance(itemName, price, balance) {
                 if (balance < price) {
                     alert("Insufficient Balance!\\nYou have " + formatCurrency(balance) + " Ks but need " + formatCurrency(price) + " Ks.\\nPlease contact admin for a top-up.");
-                    return false; // Stop the form submission
+                    return false; 
                 }
                 return confirm("Are you sure you want to buy " + itemName + " for " + formatCurrency(price) + " Ks?");
             }
-            // Add formatCurrency function to client-side JS
             function formatCurrency(amount) {
                 return amount.toLocaleString('en-US');
             }
         </script>
         </body></html>`;
-    return new Response(html, { headers: { "Content-Type": "text/html" } });
+    return new Response(html, { headers: HTML_HEADERS });
 }
 
-// ROUTE: /user-info (UPDATED with Timezone + Formatting)
+// UPDATED: Now shows Purchase History
 async function handleUserInfoPage(username: string): Promise<Response> {
     const user = await getUserByUsername(username);
     if (!user) return handleLogout();
@@ -335,8 +307,11 @@ async function handleUserInfoPage(username: string): Promise<Response> {
 
     const topUpHistory = transactions.filter(t => t.type === 'topup')
         .map(t => `<li>On ${toMyanmarTime(t.timestamp)}, you received <strong>${formatCurrency(t.amount)} Ks</strong>.</li>`).join('');
+    
+    // NEW: Purchase History Logic
     const purchaseHistory = transactions.filter(t => t.type === 'purchase')
-        .map(t => `<li>On ${toMyanmarTime(t.timestamp)}, you bought an item for <strong>${formatCurrency(Math.abs(t.amount))} Ks</strong>.</li>`).join('');
+        .map(t => `<li>On ${toMyanmarTime(t.timestamp)}, you bought <strong>${t.itemName || 'an item'}</strong> for <strong>${formatCurrency(Math.abs(t.amount))} Ks</strong>.</li>`)
+        .join('');
 
     const html = `
         <!DOCTYPE html><html lang="my"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>My Info</title><style>${globalStyles} .info-item{font-size:1.2em; margin-bottom:10px;} .history{margin-top:20px;} ul{padding-left: 20px;}</style></head>
@@ -347,7 +322,7 @@ async function handleUserInfoPage(username: string): Promise<Response> {
         <div class="history"><h2>Top-Up History</h2>${topUpHistory.length > 0 ? `<ul>${topUpHistory}</ul>` : '<p>You have not received any top-ups yet.</p>'}</div>
         <div class="history"><h2>Purchase History</h2>${purchaseHistory.length > 0 ? `<ul>${purchaseHistory}</ul>` : '<p>You have not made any purchases yet.</p>'}</div>
         <a href="/dashboard">Back to Shop</a></div></body></html>`;
-    return new Response(html, { headers: { "Content-Type": "text/html" } });
+    return new Response(html, { headers: HTML_HEADERS });
 }
 
 
@@ -388,6 +363,7 @@ async function handleRegister(req: Request): Promise<Response> {
     }
 }
 
+// UPDATED: handleBuy now passes itemName to logTransaction
 async function handleBuy(req: Request, username: string): Promise<Response> {
     const formData = await req.formData();
     const item = formData.get("item")?.toString();
@@ -401,7 +377,7 @@ async function handleBuy(req: Request, username: string): Promise<Response> {
     const success = await updateUserBalance(username, -price); 
 
     if (success) {
-        await logTransaction(username, -price, "purchase");
+        await logTransaction(username, -price, "purchase", item); // Pass item name here
         const newBalance = (await getUserByUsername(username))?.balance ?? 0;
         const message = `You bought <strong>${item}</strong> for ${formatCurrency(price)} Ks.<br>Your new balance is <strong>${formatCurrency(newBalance)} Ks</strong>.`;
         return renderMessagePage("Purchase Successful!", message, false);
@@ -426,7 +402,7 @@ async function handleAdminTopUp(formData: FormData): Promise<Response> {
     const success = await updateUserBalance(username, amount);
 
     if (success) {
-        await logTransaction(username, amount, "topup");
+        await logTransaction(username, amount, "topup"); // No item name
         const headers = new Headers();
         headers.set("Location", `/admin/panel?token=${token}&message=topup_success`);
         return new Response("Redirecting...", { status: 302, headers });
@@ -545,14 +521,15 @@ async function handler(req: Request): Promise<Response> {
         // User POST (does not need token)
         if (pathname === "/auth") return handleAuth(req);
         if (pathname === "/doregister") return handleRegister(req);
+        
+        // --- User 'Buy' POST (needs session) ---
         if (pathname === "/buy") {
             const username = getUsernameFromCookie(req);
             if (!username) return handleLogout();
-            return handleBuy(req, username);
-Gallery
+            return handleBuy(req, username); 
         }
 
-        // Admin POST (requires token)
+        // --- Admin POST (requires token) ---
         const formData = await req.formData();
         const token = formData.get("token")?.toString();
         if (token !== ADMIN_TOKEN) {
