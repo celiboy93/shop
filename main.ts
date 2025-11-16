@@ -502,7 +502,7 @@ async function handleUserInfoPage(req: Request, username: string): Promise<Respo
 
     let messageHtml = "";
     if (message === "redeem_success") messageHtml = `<div class="success-msg">Success! ${formatCurrency(parseInt(value || "0"))} Ks was added to your balance.</div>`;
-    if (message === "transfer_success") messageHtml = `<div class="success-msg">Success! You sent ${formatCurrency(parseInt(value || "0"))} Ks to ${recipient}.</div>`;
+    if (message === "transfer_success") messageHtml = `<div class"success-msg">Success! You sent ${formatCurrency(parseInt(value || "0"))} Ks to ${recipient}.</div>`;
     if (error) messageHtml = `<div class="error" style="margin-top: 15px;">${decodeURIComponent(error)}</div>`;
 
     function toMyanmarTime(utcString: string): string {
@@ -825,24 +825,6 @@ async function handleResetPassword(formData: FormData): Promise<Response> {
         return renderMessagePage("Error", `Failed to reset password for ${username}. User may not exist.`, true, adminBackLink);
     }
 }
-
-// NEW: Handler to toggle block status
-async function handleToggleBlock(formData: FormData): Promise<Response> {
-    const username = formData.get("name")?.toString();
-    const token = formData.get("token")?.toString();
-    const adminBackLink = `/admin/panel?token=${token}`;
-
-    if (!username) {
-        return renderMessagePage("Error", "Missing username.", true, adminBackLink);
-    }
-
-    const message = await toggleBlockUser(username);
-
-    const headers = new Headers();
-    headers.set("Location", `/admin/panel?token=${token}&message=${encodeURIComponent(message)}`);
-    return new Response("Redirecting...", { status: 302, headers });
-}
-
 
 async function handleRedeemVoucher(formData: FormData, username: string): Promise<Response> {
     const code = formData.get("code")?.toString().toUpperCase();
