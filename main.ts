@@ -24,11 +24,10 @@ interface Product {
     price: number; 
     imageUrl: string; 
 }
-// NEW: Structure for Voucher Codes
 interface Voucher {
-    code: string; // The redeemable code (e.g., SHOP-12345)
-    value: number; // How much it is worth
-    isUsed: boolean; // To prevent reuse
+    code: string; 
+    value: number; 
+    isUsed: boolean; 
     generatedAt: string;
 }
 
@@ -132,23 +131,17 @@ async function deleteProduct(id: string): Promise<void> {
     await kv.delete(key);
 }
 
-// --- NEW: Voucher KV Functions ---
+// --- Voucher KV Functions ---
 async function generateVoucher(value: number): Promise<Voucher> {
-    // Generate a simple, unique-ish code
     const code = `SHOP-${Date.now().toString().slice(-6)}`; 
-    const voucher: Voucher = {
-        code,
-        value,
-        isUsed: false,
-        generatedAt: new Date().toISOString()
-    };
+    const voucher: Voucher = { code, value, isUsed: false, generatedAt: new Date().toISOString() };
     const key = ["vouchers", code];
     await kv.set(key, voucher);
     return voucher;
 }
 
 async function getVoucherByCode(code: string): Promise<{value: Voucher, versionstamp: string} | null> {
-    const key = ["vouchers", code];
+    const key = ["vouchers", code.toUpperCase()]; // Always check uppercase
     const result = await kv.get<{value: Voucher, versionstamp: string}>(key);
     if (!result.value) return null;
     return result;
@@ -207,6 +200,7 @@ const globalStyles = `
     a { color: #007bff; text-decoration: none; }
     button { background-color: #007bff; color: white; border: none; padding: 12px 20px; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: 600; width: 100%; }
     .error { color: #dc3545; background-color: #f8d7da; padding: 10px; border-radius: 5px; margin-bottom: 15px; }
+    .success-msg { padding: 10px; background-color: #d4edda; color: #155724; border-radius: 5px; margin-bottom: 15px; }
     input[type="text"], input[type="password"], input[type="number"], input[type="url"] { 
         width: 95%; padding: 12px 10px; margin-top: 5px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; 
     }
@@ -249,26 +243,6 @@ function renderRegisterForm(req: Request): Response {
     return new Response(html, { headers: HTML_HEADERS });
 }
 
-// NEW: Page for user to redeem a voucher
-function renderRedeemPage(req: Request): Response {
-    const url = new URL(req.url);
-    const error = url.searchParams.get("error");
-    
-    let errorHtml = "";
-    if (error === 'invalid') errorHtml = '<p class="error">This voucher code is not valid.</p>';
-    if (error === 'used') errorHtml = '<p class="error">This voucher code has already been used.</p>';
-
-    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Redeem Voucher</title><style>${globalStyles} button.redeem{background-color:#17a2b8;}</style></head>
-        <body><div class="container"><h1>Redeem Voucher</h1>${errorHtml} 
-        <form action="/redeem_voucher" method="POST">
-        <label for="code">Voucher Code:</label><br>
-        <input type="text" id="code" name="code" required style="text-transform: uppercase;"><br><br>
-        <button type="submit" class="redeem">Redeem Now</button></form>
-        <p style="margin-top:20px; text-align:center;"><a href="/dashboard">Back to Shop</a></p></div></body></html>`;
-    return new Response(html, { headers: HTML_HEADERS });
-}
-
-
 async function renderAdminPanel(token: string, message: string | null): Promise<Response> {
     let messageHtml = "";
     if (message === "topup_success") messageHtml = `<div class="success-msg">User balance updated!</div>`;
@@ -291,7 +265,6 @@ async function renderAdminPanel(token: string, message: string | null): Promise<
         </div>
     `).join('');
 
-    // NEW: Get list of unused vouchers
     const vouchers = await getUnusedVouchers();
     const voucherListHtml = vouchers.map(v => `
         <div class="voucher-item">
@@ -305,7 +278,6 @@ async function renderAdminPanel(token: string, message: string | null): Promise<
         <style>${globalStyles}
             button.admin{background-color:#28a745;} button.product{background-color:#ffc107; color:black;} button.reset{background-color:#dc3545;} button.voucher{background-color:#17a2b8;}
             hr{margin:30px 0; border:0; border-top:1px solid #eee;}
-            .success-msg { padding: 10px; background-color: #d4edda; color: #155724; border-radius: 5px; margin-bottom: 15px; }
             .product-item, .voucher-item { display:flex; justify-content:space-between; align-items:center; padding:10px; border-bottom:1px solid #eee; }
             .edit-btn { background-color:#007bff; color:white; padding:5px 10px; border-radius:4px; font-size: 14px; }
             .delete-btn { background-color:#dc3545; padding:5px 10px; font-size: 14px; }
@@ -381,8 +353,6 @@ async function handleDashboard(username: string): Promise<Response> {
             .nav-links a { display: block; padding: 10px 15px; border-radius: 8px; text-align: center; font-weight: 600; text-decoration: none; }
             .info-btn { background-color: #007bff; color: white; border: 1px solid #007bff; }
             .logout-btn { background-color: #ffffff; color: #007bff; border: 1px solid #007bff; }
-            /* NEW */ .redeem-btn { background-color: #17a2b8; color: white; border: 1px solid #17a2b8; flex: 1; }
-            
             .balance-box { background: linear-gradient(90deg, #007bff, #0056b3); color: white; padding: 20px; border-radius: 12px; margin-bottom: 25px; text-align: center; }
             .balance-label { font-size: 16px; opacity: 0.9; }
             .balance-amount { font-size: 2.5em; font-weight: 700; letter-spacing: 1px; }
@@ -404,8 +374,6 @@ async function handleDashboard(username: string): Promise<Response> {
                 <div class="balance-label">Welcome, ${user.username}!</div>
                 <div class="balance-amount">${formatCurrency(user.balance)} Ks</div>
             </div>
-            <a href="/redeem" class="redeem-btn" style="width: 90%; text-align:center; margin-bottom: 25px;">Redeem Voucher Code</a>
-            
             <h2>🛒 Shop Items:</h2>
             <div class="product-grid">
                 ${products.length > 0 ? productListHtml : '<p>No products available yet.</p>'}
@@ -427,38 +395,60 @@ async function handleDashboard(username: string): Promise<Response> {
     return new Response(html, { headers: HTML_HEADERS });
 }
 
-async function handleUserInfoPage(username: string): Promise<Response> {
+// ----------------------------------------------------
+// (!!!!) USER INFO FUNCTION - UI UPDATED (!!!!)
+// ----------------------------------------------------
+async function handleUserInfoPage(req: Request, username: string): Promise<Response> {
     const user = await getUserByUsername(username);
     if (!user) return handleLogout();
 
     const transactions = await getTransactions(username);
     
+    // Check for redeem messages
+    const url = new URL(req.url);
+    const message = url.searchParams.get("message");
+    const error = url.searchParams.get("error");
+    const value = url.searchParams.get("value");
+
+    let messageHtml = "";
+    if (message === "redeem_success") {
+        messageHtml = `<div class="success-msg">Success! ${formatCurrency(parseInt(value || "0"))} Ks was added to your balance.</div>`;
+    }
+    if (error === "invalid_code") {
+        messageHtml = `<div class="error-msg">That voucher code is not valid.</div>`;
+    }
+    if (error === "used_code") {
+        messageHtml = `<div class"error-msg">That voucher code has already been used.</div>`;
+    }
+
     function toMyanmarTime(utcString: string): string {
         try { return new Date(utcString).toLocaleString("en-US", { timeZone: MYANMAR_TIMEZONE, hour12: true }); } 
         catch (e) { return utcString; }
     }
 
     const topUpHistory = transactions.filter(t => t.type === 'topup')
-        .map(t => `
-            <li class="topup">
-                <span><strong>${t.itemName || 'Top Up'}</strong> <strong>${formatCurrency(t.amount)} Ks</strong></span>
-                <span class="time">${toMyanmarTime(t.timestamp)}</span>
-            </li>`).join('');
+        .map(t => `<li class="topup"><span><strong>${t.itemName || 'Top Up'}</strong> <strong>${formatCurrency(t.amount)} Ks</strong></span><span class="time">${toMyanmarTime(t.timestamp)}</span></li>`).join('');
     
     const purchaseHistory = transactions.filter(t => t.type === 'purchase')
-        .map(t => `
-            <li class="purchase">
-                <span>Bought <strong>${t.itemName || 'an item'}</strong> for <strong>${formatCurrency(Math.abs(t.amount))} Ks</strong></span>
-                <span class="time">${toMyanmarTime(t.timestamp)}</span>
-            </li>`).join('');
+        .map(t => `<li class="purchase"><span>Bought <strong>${t.itemName || 'an item'}</strong> for <strong>${formatCurrency(Math.abs(t.amount))} Ks</strong></span><span class="time">${toMyanmarTime(t.timestamp)}</span></li>`)
+        .join('');
 
     const html = `
         <!DOCTYPE html><html lang="my"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>My Info</title>
         <style>${globalStyles}
-            .header-card { background: linear-gradient(90deg, #007bff, #0056b3); color: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
-            .header-card h1 { color: white; margin: 0 0 10px 0; text-align: left; }
-            .header-card .info-item { font-size: 1.2em; opacity: 0.9; }
-            .balance { font-size: 2em; font-weight: 700; }
+            /* NEW Profile Header */
+            .profile-header { display: flex; align-items: center; margin-bottom: 20px; }
+            .avatar { width: 60px; height: 60px; border-radius: 50%; background-color: #eee; margin-right: 15px; display: flex; justify-content: center; align-items: center; overflow: hidden; }
+            .avatar svg { width: 32px; height: 32px; color: #aaa; }
+            .profile-info { flex-grow: 1; }
+            .profile-name { font-size: 1.5em; font-weight: 600; color: #333; margin: 0; }
+            .profile-balance { font-size: 1.2em; color: #007bff; font-weight: 500; margin: 0; }
+            
+            /* NEW Redeem Form */
+            .redeem-form { margin-bottom: 25px; }
+            .redeem-form input { width: 70%; }
+            .redeem-form button { width: auto; background-color: #17a2b8; }
+            
             .history { margin-top: 25px; }
             .history h2 { border-bottom: 1px solid #eee; padding-bottom: 5px; }
             .history ul { padding-left: 0; list-style-type: none; }
@@ -466,18 +456,35 @@ async function handleUserInfoPage(username: string): Promise<Response> {
             .history li.topup { border-left-color: #28a745; }
             .history li.purchase { border-left-color: #ffc107; }
             .history li .time { font-size: 0.9em; color: #777; }
-            .redeem-link { display:block; text-align:center; margin: 20px 0; padding: 12px; background-color: #17a2b8; color: white; border-radius: 8px; font-weight: 600; }
         </style></head>
         <body><div class="container">
-        <div class="header-card">
-            <h1>My User Info</h1>
-            <div class="info-item"><strong>Username:</strong> ${user.username}</div>
-            <div class="info-item"><strong>Balance:</strong> <span class="balance">${formatCurrency(user.balance)} Ks</span></div>
+        
+        <div class="profile-header">
+            <div class="avatar">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A1.875 1.875 0 0 1 18 22.5H6c-.98 0-1.813-.73-1.93-1.703a1.875 1.875 0 0 1 .03-1.179Z" />
+                </svg>
+            </div>
+            <div class="profile-info">
+                <h1 class="profile-name">${user.username}</h1>
+                <div class="profile-balance">${formatCurrency(user.balance)} Ks</div>
+            </div>
         </div>
-        <a href="/redeem" class="redeem-link">Redeem a Voucher Code</a>
+        
+        ${messageHtml} <div class="redeem-form">
+            <h2>Redeem Voucher</h2>
+            <form action="/redeem_voucher" method="POST" style="display: flex; gap: 10px;">
+                <input type="text" id="code" name="code" required style="text-transform: uppercase; margin: 0; flex: 1;" placeholder="Enter code">
+                <button type="submit" class="redeem">Redeem</button>
+            </form>
+        </div>
+
         <div class="history"><h2>Top-Up History</h2>${topUpHistory.length > 0 ? `<ul>${topUpHistory}</ul>` : '<p>You have not received any top-ups yet.</p>'}</div>
         <div class="history"><h2>Purchase History</h2>${purchaseHistory.length > 0 ? `<ul>${purchaseHistory}</ul>` : '<p>You have not made any purchases yet.</p>'}</div>
-        <a href="/dashboard" style="display:block; text-align:center; margin-top:20px;">Back to Shop</a></div></body></html>`;
+        
+        <a href="/dashboard" style="display:block; text-align:center; margin-top:20px;">Back to Shop</a>
+        
+        </div></body></html>`;
     return new Response(html, { headers: HTML_HEADERS });
 }
 
@@ -564,7 +571,7 @@ async function handleAdminTopUp(formData: FormData): Promise<Response> {
     const success = await updateUserBalance(username, amount);
 
     if (success) {
-        await logTransaction(username, amount, "topup"); 
+        await logTransaction(username, amount, "topup", "Admin Top-Up"); 
         const headers = new Headers();
         headers.set("Location", `/admin/panel?token=${token}&message=topup_success`);
         return new Response("Redirecting...", { status: 302, headers });
@@ -649,48 +656,46 @@ async function handleResetPassword(formData: FormData): Promise<Response> {
     }
 }
 
-// NEW: Handler to redeem a voucher
+// UPDATED: handleRedeemVoucher now redirects back to /user-info
 async function handleRedeemVoucher(formData: FormData, username: string): Promise<Response> {
     const code = formData.get("code")?.toString().toUpperCase();
-    
+    const headers = new Headers();
+
     if (!code) {
-        return renderMessagePage("Error", "Please enter a voucher code.", true, "/redeem");
+        headers.set("Location", "/user-info?error=invalid_code");
+        return new Response("Redirecting...", { status: 302, headers });
     }
 
-    // 1. Find the voucher
     const result = await getVoucherByCode(code);
     if (!result || !result.value) {
-        return renderMessagePage("Error", "This voucher code is not valid.", true, "/redeem");
+        headers.set("Location", "/user-info?error=invalid_code");
+        return new Response("Redirecting...", { status: 302, headers });
     }
     
     const voucher = result.value;
     
-    // 2. Check if used
     if (voucher.isUsed) {
-        return renderMessagePage("Error", "This voucher code has already been used.", true, "/redeem");
+        headers.set("Location", "/user-info?error=used_code");
+        return new Response("Redirecting...", { status: 302, headers });
     }
     
-    // 3. Invalidate the voucher (Atomic operation)
     const atomicRes = await kv.atomic()
-        .check(result) // Ensure no one else is redeeming it at the same time
+        .check(result) 
         .set(result.key, { ...voucher, isUsed: true })
         .commit();
         
     if (!atomicRes.ok) {
-        return renderMessagePage("Error", "Redemption failed (race condition). Please try again.", true, "/redeem");
+        headers.set("Location", "/user-info?error=try_again");
+        return new Response("Redirecting...", { status: 302, headers });
     }
     
-    // 4. Add balance to user
     await updateUserBalance(username, voucher.value);
-    
-    // 5. Log transaction
     await logTransaction(username, voucher.value, "topup", `Voucher: ${voucher.code}`);
     
-    const message = `Success! <strong>${formatCurrency(voucher.value)} Ks</strong> has been added to your balance.`;
-    return renderMessagePage("Voucher Redeemed!", message, false); // Auto-redirects to dashboard
+    headers.set("Location", `/user-info?message=redeem_success&value=${voucher.value}`);
+    return new Response("Redirecting...", { status: 302, headers });
 }
 
-// NEW: Handler to create a voucher
 async function handleCreateVoucher(formData: FormData): Promise<Response> {
     const amountStr = formData.get("amount")?.toString();
     const amount = amountStr ? parseInt(amountStr) : NaN;
@@ -729,7 +734,7 @@ async function handler(req: Request): Promise<Response> {
         if (pathname === "/login") return renderLoginForm(req); 
         if (pathname === "/register") return renderRegisterForm(req); 
         if (pathname === "/logout") return handleLogout();
-        if (pathname === "/redeem") return renderRedeemPage(req); // NEW
+        // REMOVED: /redeem GET route is no longer needed
 
         // Admin GET
         const token = url.searchParams.get("token");
@@ -755,7 +760,7 @@ async function handler(req: Request): Promise<Response> {
             }
         } else {
              if (pathname === "/" || pathname === "/dashboard") return await handleDashboard(username);
-             if (pathname === "/user-info") return await handleUserInfoPage(username);
+             if (pathname === "/user-info") return await handleUserInfoPage(req, username); // Pass req
         }
     }
     
@@ -768,13 +773,11 @@ async function handler(req: Request): Promise<Response> {
         if (pathname === "/doregister") return await handleRegister(formData);
 
         // User 'Buy' & 'Redeem' POST (Protected)
-        if (pathname === "/buy" || pathname === "/redeem_voucher") {
-            const username = getUsernameFromCookie(req);
-            if (!username) return handleLogout(); // Must be logged in
-            
-            if (pathname === "/buy") return await handleBuy(formData, username);
-            if (pathname === "/redeem_voucher") return await handleRedeemVoucher(formData, username); // NEW
-        }
+        const username = getUsernameFromCookie(req);
+        if (!username) return handleLogout(); // Must be logged in
+        
+        if (pathname === "/buy") return await handleBuy(formData, username);
+        if (pathname === "/redeem_voucher") return await handleRedeemVoucher(formData, username); 
 
         // Admin POST (Protected)
         const token = formData.get("token")?.toString();
@@ -787,7 +790,7 @@ async function handler(req: Request): Promise<Response> {
         if (pathname === "/admin/update_product") return await handleUpdateProduct(formData);
         if (pathname === "/admin/delete_product") return await handleDeleteProduct(formData);
         if (pathname === "/admin/reset_password") return await handleResetPassword(formData); 
-        if (pathname === "/admin/create_voucher") return await handleCreateVoucher(formData); // NEW
+        if (pathname === "/admin/create_voucher") return await handleCreateVoucher(formData); 
     }
 
     // --- Default Route (Redirect all other requests to login) ---
