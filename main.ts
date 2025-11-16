@@ -45,6 +45,17 @@ interface Voucher {
 interface Announcement {
     message: string;
 }
+// NEW: Data structure for Payment Info
+interface PaymentInfo {
+    instructions: string;
+    telegramUser: string;
+    kpayLogoUrl: string;
+    kpayNumber: string;
+    kpayName: string;
+    waveLogoUrl: string;
+    waveNumber: string;
+    waveName: string;
+}
 
 // ----------------------------------------------------
 // Core Helper Functions
@@ -276,6 +287,18 @@ async function setAnnouncement(message: string): Promise<void> {
     }
 }
 
+// --- NEW: Payment Info KV Functions ---
+async function getPaymentInfo(): Promise<PaymentInfo | null> {
+    const key = ["payment_info"];
+    const result = await kv.get<PaymentInfo>(key);
+    return result.value;
+}
+
+async function setPaymentInfo(info: PaymentInfo): Promise<void> {
+    const key = ["payment_info"];
+    await kv.set(key, info);
+}
+
 // ----------------------------------------------------
 // Authentication Helpers
 // ----------------------------------------------------
@@ -384,6 +407,7 @@ function renderRegisterForm(req: Request): Response {
     return new Response(html, { headers: HTML_HEADERS });
 }
 
+// UPDATED: Admin Panel now includes "Set Payment Info"
 async function renderAdminPanel(token: string, message: string | null): Promise<Response> {
     let messageHtml = "";
     if (message) messageHtml = `<div class="success-msg">${decodeURIComponent(message)}</div>`;
@@ -410,6 +434,7 @@ async function renderAdminPanel(token: string, message: string | null): Promise<
     `).join('');
     
     const currentAnnouncement = await getAnnouncement() || "";
+    const pInfo = await getPaymentInfo() || {}; // Get current payment info
     
     const salesHistory = await getDigitalSalesHistory();
     const salesHistoryHtml = salesHistory.map(s => `
@@ -419,12 +444,11 @@ async function renderAdminPanel(token: string, message: string | null): Promise<
         </div>
     `).join('');
 
-
     const html = `
         <!DOCTYPE html><html lang="my"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Admin Panel</title>
         <style>${globalStyles}
             button.admin{background-color:#28a745;} button.product{background-color:#ffc107; color:black;} button.reset{background-color:#dc3545;} button.voucher{background-color:#17a2b8;}
-            button.announcement{background-color:#6610f2;}
+            button.announcement{background-color:#6610f2;} button.payment{background-color:#0dcaf0;}
             hr{margin:30px 0; border:0; border-top:1px solid #eee;}
             .product-item, .voucher-item { display:flex; justify-content:space-between; align-items:center; padding:10px; border-bottom:1px solid #eee; }
             .edit-btn { background-color:#007bff; color:white; padding:5px 10px; border-radius:4px; font-size: 14px; }
@@ -434,6 +458,21 @@ async function renderAdminPanel(token: string, message: string | null): Promise<
         </style></head>
         <body><div class="container" style="max-width: 700px;">
             ${messageHtml}
+            
+            <h2>Set Payment Info</h2>
+            <form action="/admin/set_payment_info" method="POST">
+                <input type="hidden" name="token" value="${token}">
+                <label>Instructions:</label><textarea name="instructions" rows="3" style="width:95%;">${pInfo.instructions || 'Voucher Code ဝယ်ယူရန် (သို့) Admin မှ တိုက်ရိုက်ငွေဖြည့်ရန် Telegram မှ ဆက်သွယ်ပါ။'}</textarea><br><br>
+                <label>Telegram Username (no @):</label><input type="text" name="telegramUser" value="${pInfo.telegramUser || 'iqowoq'}"><br><br>
+                <label>KPay Logo URL:</label><input type="url" name="kpayLogoUrl" value="${pInfo.kpayLogoUrl || 'https://i2.qyimage.store:2999/i/2e0ca3029baf42b1'}"><br><br>
+                <label>KPay Number:</label><input type="text" name="kpayNumber" value="${pInfo.kpayNumber || '09961650283'}"><br><br>
+                <label>KPay Name:</label><input type="text" name="kpayName" value="${pInfo.kpayName || 'thein naing win'}"><br><br>
+                <label>Wave Pay Logo URL:</label><input type="url" name="waveLogoUrl" value="${pInfo.waveLogoUrl || 'https://i2.qyimage.store:2999/i/c139deae73934177'}"><br><br>
+                <label>Wave Pay Number:</label><input type="text" name="waveNumber" value="${pInfo.waveNumber || '09688171999'}"><br><br>
+                <label>Wave Pay Name:</label><input type="text" name="waveName" value="${pInfo.waveName || 'thein naing win'}"><br><br>
+                <button type="submit" class="payment">Update Payment Info</button>
+            </form><hr>
+
             <h2>Site Announcement (Marquee)</h2>
             <form action="/admin/set_announcement" method="POST"><input type="hidden" name="token" value="${token}"><label>Message (leave empty to remove):</label><input type="text" name="message" value="${currentAnnouncement}"><br><br><button type="submit" class="announcement">Set Announcement</button></form><hr>
 
@@ -649,20 +688,50 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
             `;
         }).join('');
 
+    // NEW: Get dynamic payment info
+    const paymentInfo = await getPaymentInfo();
+    let paymentHtml = `<div class="form-box payment-info"><p>Admin has not set up payment info yet.</p></div>`; // Default
+    if (paymentInfo) {
+        paymentHtml = `
+        <div class="form-box payment-info">
+            <h2>${paymentInfo.instructions ? 'ငွေဖြည့်နည်း' : ''}</h2>
+            <p style="margin-top:0; color:#555;">${paymentInfo.instructions || ''}</p>
+            <div class="payment-list">
+                <a href="https://t.me/${paymentInfo.telegramUser}" target="_blank" class="telegram-link">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M19.467 1.817a1.68 1.68 0 0 0-1.57-.002L3.58 6.471A1.68 1.68 0 0 0 2.21 7.91v1.314a1.68 1.68 0 0 0 .58 1.258l5.96 4.708a.75.75 0 0 1 .31.623v5.04a.75.75 0 0 0 1.25.59L12 19.333l3.22 2.451a.75.75 0 0 0 1.25-.59v-5.04a.75.75 0 0 1 .31-.623l5.96-4.708a1.68 1.68 0 0 0 .58-1.258V7.91a1.68 1.68 0 0 0-1.37-1.443L19.467 1.817Z" /></svg>
+                    <span>@${paymentInfo.telegramUser}</span>
+                </a>
+                <hr style="border:0; border-top:1px solid #eee; margin: 15px 0;">
+                <div class="payment-account">
+                    <strong><img src="${paymentInfo.kpayLogoUrl}" height="20" alt="KPay"></strong>
+                    <div class="details">
+                        <span class="number">${paymentInfo.kpayNumber}</span>
+                        <span class="name">${paymentInfo.kpayName}</span>
+                    </div>
+                </div>
+                <div class="payment-account">
+                    <strong><img src="${paymentInfo.waveLogoUrl}" height="20" alt="WavePay"></strong>
+                    <div class="details">
+                        <span class="number">${paymentInfo.waveNumber}</span>
+                        <span class="name">${paymentInfo.waveName}</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+        `;
+    }
 
     const html = `
         <!DOCTYPE html><html lang="my"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>My Info</title>
         <style>${globalStyles}
-            /* Profile Header */
             .profile-header { display: flex; align-items: center; margin-bottom: 20px; }
             .avatar { width: 60px; height: 60px; border-radius: 50%; background-color: #eee; margin-right: 15px; display: flex; justify-content: center; align-items: center; overflow: hidden; }
             .avatar svg { width: 32px; height: 32px; color: #aaa; }
             /* FIXED: Alignment */
-            .profile-info { display: block; } /* Changed from flex */
+            .profile-info { display: block; } 
             .profile-name { font-size: 1.8em; font-weight: 600; color: #333; margin: 0; user-select: all; }
             .copy-btn-small { background: #007bff; color: white; border: none; padding: 5px 10px; font-size: 12px; border-radius: 5px; cursor: pointer; margin-top: 5px; width: auto; }
             
-            /* Form Box */
             .form-box { margin-bottom: 25px; background: #f9f9f9; padding: 20px; border-radius: 8px; }
             .form-box h2 { margin-top: 0; }
             .form-box input { width: 90%; }
@@ -685,6 +754,7 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
             .payment-list { padding-left: 0; list-style: none; margin-top: 15px; }
             .payment-account { display: grid; grid-template-columns: 100px auto; align-items: center; margin-bottom: 12px; font-size: 1.1em; }
             .payment-account strong { font-weight: 600; color: #333; }
+            .payment-account strong img { height: 25px; vertical-align: middle; }
             .payment-account .details { display: flex; flex-direction: column; }
             .payment-account .number { font-weight: 600; color: #0056b3; }
             .payment-account .name { font-size: 0.9em; color: #555; }
@@ -703,21 +773,7 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
             </div>
         </div>
         
-        ${messageHtml} <div class="form-box payment-info">
-            <h2>ငွေဖြည့်နည်း</h2>
-            <p style="margin-top:0; color:#555;">Voucher Code ဝယ်ယူရန် (သို့) Admin မှ တိုက်ရိုက်ငွေဖြည့်ရန် Telegram မှ ဆက်သွယ်ပါ။</p>
-            <div class="payment-list">
-                <a href="https://t.me/iqowoq" target="_blank" class="telegram-link">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M19.467 1.817a1.68 1.68 0 0 0-1.57-.002L3.58 6.471A1.68 1.68 0 0 0 2.21 7.91v1.314a1.68 1.68 0 0 0 .58 1.258l5.96 4.708a.75.75 0 0 1 .31.623v5.04a.75.75 0 0 0 1.25.59L12 19.333l3.22 2.451a.75.75 0 0 0 1.25-.59v-5.04a.75.75 0 0 1 .31-.623l5.96-4.708a1.68 1.68 0 0 0 .58-1.258V7.91a1.68 1.68 0 0 0-1.37-1.443L19.467 1.817Z" /></svg>
-                    <span>@iqowoq</span>
-                </a>
-                <hr style="border:0; border-top:1px solid #eee; margin: 15px 0;">
-                <div class="payment-account"><strong>KPay:</strong><div class="details"><span class="number">09961650283</span><span class="name">thein naing win</span></div></div>
-                <div class="payment-account"><strong>Wave Pay:</strong><div class="details"><span class="number">09688171999</span><span class="name">thein naing win</span></div></div>
-            </div>
-        </div>
-
-        <div class="form-box">
+        ${messageHtml} ${paymentHtml} <div class="form-box">
             <h2>Redeem Voucher</h2>
             <form action="/redeem_voucher" method="POST" style="display: flex; gap: 10px;">
                 <input type="text" id="code" name="code" required style="text-transform: uppercase; margin: 0; flex: 1;" placeholder="Enter code">
