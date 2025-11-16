@@ -15,8 +15,8 @@ interface User {
 interface Transaction {
     type: "topup" | "purchase";
     amount: number;
-    timestamp: string; 
-    itemName?: string; 
+    timestamp: string; // Stored in UTC
+    itemName?: string; // Store the item name for purchases
 }
 interface Product {
     id: string; 
@@ -248,7 +248,7 @@ async function renderAdminPanel(token: string, message: string | null): Promise<
     if (message === "topup_success") messageHtml = `<div class="success-msg">User balance updated!</div>`;
     if (message === "product_added") messageHtml = `<div class="success-msg">Product added!</div>`;
     if (message === "product_updated") messageHtml = `<div class="success-msg">Product updated!</div>`;
-    if (message === "product_deleted") messageHtml = `<div class="success-msg" style="background-color:#f8d7da; color:#721c24;">Product deleted!</div>`;
+    if (message === "product_deleted") messageHtml = `<div class"success-msg" style="background-color:#f8d7da; color:#721c24;">Product deleted!</div>`;
     if (message === "pass_reset_success") messageHtml = `<div class="success-msg">User password reset successfully!</div>`;
     if (message === "voucher_created") messageHtml = `<div class="success-msg">Voucher created successfully!</div>`;
 
@@ -414,11 +414,11 @@ async function handleUserInfoPage(req: Request, username: string): Promise<Respo
     if (message === "redeem_success") {
         messageHtml = `<div class="success-msg">Success! ${formatCurrency(parseInt(value || "0"))} Ks was added to your balance.</div>`;
     }
-    if (error === "invalid_code") {
-        messageHtml = `<div class="error-msg">That voucher code is not valid.</div>`;
-    }
-    if (error === "used_code") {
-        messageHtml = `<div class"error-msg">That voucher code has already been used.</div>`;
+    if (error === "invalid_code" || error === "used_code" || error === "try_again") {
+        let errorText = "That voucher code is not valid.";
+        if (error === "used_code") errorText = "That voucher code has already been used.";
+        if (error === "try_again") errorText = "Redemption failed. Please try again.";
+        messageHtml = `<div class="error" style="margin-top: 15px;">${errorText}</div>`;
     }
 
     function toMyanmarTime(utcString: string): string {
@@ -441,6 +441,7 @@ async function handleUserInfoPage(req: Request, username: string): Promise<Respo
             .avatar { width: 60px; height: 60px; border-radius: 50%; background-color: #eee; margin-right: 15px; display: flex; justify-content: center; align-items: center; overflow: hidden; }
             .avatar svg { width: 32px; height: 32px; color: #aaa; }
             .profile-info { flex-grow: 1; }
+            /* FIXED: Alignment */
             .profile-name { font-size: 1.5em; font-weight: 600; color: #333; margin: 0; }
             .profile-balance { font-size: 1.2em; color: #007bff; font-weight: 500; margin: 0; }
             
@@ -451,8 +452,16 @@ async function handleUserInfoPage(req: Request, username: string): Promise<Respo
             
             .history { margin-top: 25px; }
             .history h2 { border-bottom: 1px solid #eee; padding-bottom: 5px; }
-            .history ul { padding-left: 0; list-style-type: none; }
-            .history li { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; padding: 12px; background: #fdfdfd; border: 1px solid #eee; border-radius: 8px; border-left-width: 5px; }
+            .history-list { /* NEW SCROLL BOX */
+                max-height: 300px;
+                overflow-y: auto;
+                background-color: #fcfcfc;
+                border: 1px solid #eee;
+                padding: 10px;
+                border-radius: 8px;
+            }
+            .history ul { padding-left: 0; list-style-type: none; margin: 0; }
+            .history li { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; padding: 12px; background: #fff; border: 1px solid #eee; border-radius: 8px; border-left-width: 5px; }
             .history li.topup { border-left-color: #28a745; }
             .history li.purchase { border-left-color: #ffc107; }
             .history li .time { font-size: 0.9em; color: #777; }
@@ -471,16 +480,24 @@ async function handleUserInfoPage(req: Request, username: string): Promise<Respo
             </div>
         </div>
         
-        ${messageHtml} <div class="redeem-form">
+        <div class="redeem-form">
             <h2>Redeem Voucher</h2>
             <form action="/redeem_voucher" method="POST" style="display: flex; gap: 10px;">
                 <input type="text" id="code" name="code" required style="text-transform: uppercase; margin: 0; flex: 1;" placeholder="Enter code">
                 <button type="submit" class="redeem">Redeem</button>
             </form>
-        </div>
+            ${messageHtml} </div>
 
-        <div class="history"><h2>Top-Up History</h2>${topUpHistory.length > 0 ? `<ul>${topUpHistory}</ul>` : '<p>You have not received any top-ups yet.</p>'}</div>
-        <div class="history"><h2>Purchase History</h2>${purchaseHistory.length > 0 ? `<ul>${purchaseHistory}</ul>` : '<p>You have not made any purchases yet.</p>'}</div>
+        <div class="history">
+            <h2>Top-Up History</h2>
+            <div class="history-list"> ${topUpHistory.length > 0 ? `<ul>${topUpHistory}</ul>` : '<p>You have not received any top-ups yet.</p>'}
+            </div>
+        </div>
+        <div class="history">
+            <h2>Purchase History</h2>
+            <div class="history-list"> ${purchaseHistory.length > 0 ? `<ul>${purchaseHistory}</ul>` : '<p>You have not made any purchases yet.</p>'}
+            </div>
+        </div>
         
         <a href="/dashboard" style="display:block; text-align:center; margin-top:20px;">Back to Shop</a>
         
@@ -734,7 +751,7 @@ async function handler(req: Request): Promise<Response> {
         if (pathname === "/login") return renderLoginForm(req); 
         if (pathname === "/register") return renderRegisterForm(req); 
         if (pathname === "/logout") return handleLogout();
-        // REMOVED: /redeem GET route is no longer needed
+        // REMOVED: /redeem GET route, it's now part of /user-info
 
         // Admin GET
         const token = url.searchParams.get("token");
