@@ -20,6 +20,14 @@ interface Transaction {
     itemName?: string; 
     itemDetails?: string; 
 }
+// NEW: For admin sales history
+interface DigitalSaleLog {
+    username: string;
+    itemName?: string;
+    itemDetails?: string;
+    timestamp: string;
+    amount: number;
+}
 interface Product {
     id: string; 
     name: string; 
@@ -45,6 +53,11 @@ interface Announcement {
 
 function formatCurrency(amount: number): string {
     return amount.toLocaleString('en-US');
+}
+
+function toMyanmarTime(utcString: string): string {
+    try { return new Date(utcString).toLocaleString("en-US", { timeZone: MYANMAR_TIMEZONE, hour12: true }); } 
+    catch (e) { return utcString; }
 }
 
 // ----------------------------------------------------
@@ -164,6 +177,26 @@ async function getTransactions(username: string): Promise<Transaction[]> {
     return transactions;
 }
 
+// NEW: Function to get all digital sales for Admin
+async function getDigitalSalesHistory(): Promise<DigitalSaleLog[]> {
+    const entries = kv.list<Transaction>({ prefix: ["transactions"] });
+    const logs: DigitalSaleLog[] = [];
+    for await (const entry of entries) {
+        const t = entry.value;
+        if (t.type === 'purchase' && t.itemDetails) {
+            logs.push({
+                username: entry.key[1] as string, // Get username from key
+                itemName: t.itemName,
+                itemDetails: t.itemDetails,
+                timestamp: t.timestamp,
+                amount: t.amount
+            });
+        }
+    }
+    return logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()); // Sort by most recent
+}
+
+
 // --- Product KV Functions ---
 async function getProducts(): Promise<Product[]> {
     const entries = kv.list<Product>({ prefix: ["products"] });
@@ -252,13 +285,11 @@ function verifyPassword(inputPassword: string, storedHash: string): boolean {
     return inputPassword === storedHash;
 }
 
-// UPDATED: Now decodes the username from the cookie
 function getUsernameFromCookie(req: Request): string | null {
     const cookieHeader = req.headers.get("Cookie");
     if (!cookieHeader || !cookieHeader.includes(SESSION_COOKIE_NAME)) return null;
     try {
         const match = cookieHeader.match(new RegExp(`${SESSION_COOKIE_NAME}=([^;]+)`));
-        // Decode the cookie value in case it contains UTF-8 characters
         return match ? decodeURIComponent(match[1].split(';')[0]) : null;
     } catch (e) {
         console.error("Cookie decode error:", e);
@@ -266,10 +297,9 @@ function getUsernameFromCookie(req: Request): string | null {
     }
 }
 
-// UPDATED: Now URI-encodes the username before setting the cookie
 function createSession(username: string, remember: boolean): Headers {
     const headers = new Headers();
-    const encodedSessionId = encodeURIComponent(username); // Encode for UTF-8 safety
+    const encodedSessionId = encodeURIComponent(username); 
     const maxAge = remember ? 2592000 : 3600; // 30 days or 1 hour
     headers.set("Location", "/dashboard");
     headers.set("Set-Cookie", `${SESSION_COOKIE_NAME}=${encodedSessionId}; Path=/; Max-Age=${maxAge}; HttpOnly; SameSite=Lax`);
@@ -299,7 +329,6 @@ const globalStyles = `
     .checkbox-container input { width: auto; margin-right: 10px; }
 `;
 
-// UPDATED: Added Login Icon
 function renderLoginForm(req: Request): Response {
     const url = new URL(req.url);
     const error = url.searchParams.get("error");
@@ -317,7 +346,7 @@ function renderLoginForm(req: Request): Response {
         <body><div class="container">
         <div class="login-icon">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 21v-7.5a.75.75 0 0 1 .75-.75h3a.75.75 0 0 1 .75.75V21m-4.5 0H2.36m11.14 0H18m0 0h2.64m-2.64 0l1.1-1.291c.414-.414.414-1.083 0-1.497l-1.1-1.291M18 21v-3.328c0-.68.27-1.306.73-1.767l1.1-1.291M18 21v-7.5a.75.75 0 0 0-.75-.75h-3a.75.75 0 0 0-.75.75V21m-4.5 0H2.36m11.14 0H18m0 0h2.64m-2.64 0l1.1-1.291c.414-.414.414-1.083 0-1.497l-1.1-1.291M18 21v-3.328c0-.68.27-1.306.73-1.767l1.1-1.291m0 0l-1.1 1.291m1.1-1.291L19.1 16.24c.414-.414.414-1.083 0-1.497l-1.1-1.291M2.36 21c.62 0 1.18-.034 1.71-.1H2.36m13.32 0a1.14 1.14 0 0 0 1.71-.1h-1.71M2.36 21c.62 0 1.18-.034 1.71-.1H2.36m13.32 0a1.14 1.14 0 0 0 1.71-.1h-1.71M2.36 21c.62 0 1.18-.034 1.71-.1H2.36m9.84-9.924c.414-.414.414-1.083 0-1.497l-1.1-1.291c-.414-.414-1.083-.414-1.497 0l-1.1 1.291c-.414.414-.414 1.083 0 1.497l1.1 1.291c.414.414 1.083.414 1.497 0l1.1-1.291M4.07 20.9c.62.066 1.18.1 1.71.1H4.07m9.84-9.924c.414-.414.414-1.083 0-1.497l-1.1-1.291c-.414-.414-1.083-.414-1.497 0l-1.1 1.291c-.414.414-.414 1.083 0 1.497l1.1 1.291c.414.414 1.083.414 1.497 0l1.1-1.291M4.07 20.9c.62.066 1.18.1 1.71.1H4.07m9.84-9.924c.414-.414.414-1.083 0-1.497l-1.1-1.291c-.414-.414-1.083-.414-1.497 0l-1.1 1.291c-.414.414-.414 1.083 0 1.497l1.1 1.291c.414.414 1.083.414 1.497 0l1.1-1.291M4.07 20.9c.62.066 1.18.1 1.71.1H4.07M4.07 20.9v-3.328c0-.68.27-1.306.73-1.767l1.1-1.291c.414-.414.414-1.083 0-1.497l-1.1-1.291c-.414-.414-1.083-.414-1.497 0l-1.1 1.291c-.414.414-.414 1.083 0 1.497l1.1 1.291c.414.414 1.083.414 1.497 0l1.1-1.291M4.07 20.9v-3.328c0-.68.27-1.306.73-1.767l1.1-1.291c.414-.414.414-1.083 0-1.497l-1.1-1.291c-.414-.414-1.083-.414-1.497 0l-1.1 1.291c-.414.414-.414 1.083 0 1.497l1.1 1.291c.414.414 1.083.414 1.497 0l1.1-1.291m0 0l-1.1 1.291m1.1-1.291L5.17 16.24c.414-.414.414-1.083 0-1.497l-1.1-1.291m0 0L2.97 12.16c-.414-.414-.414-1.083 0-1.497l1.1-1.291m0 0L2.97 7.875c-.414-.414-.414-1.083 0-1.497L4.07 5.09c.414-.414 1.083-.414 1.497 0l1.1 1.291c.414.414.414 1.083 0 1.497L5.567 9.17c-.414.414-1.083.414-1.497 0L2.97 7.875m1.1 1.291L5.17 7.875m0 0L4.07 6.583c-.414-.414-1.083-.414-1.497 0L1.473 7.875c-.414.414-.414 1.083 0 1.497l1.1 1.291c.414.414 1.083.414 1.497 0l1.1-1.291" />
+                <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 21v-7.5a.75.75 0 0 1 .75-.75h3a.75.75 0 0 1 .75.75V21m-4.5 0H2.36m11.14 0H18m0 0h2.64m-2.64 0l1.1-1.291c.414-.414.414-1.083 0-1.497l-1.1-1.291M18 21v-3.328c0-.68.27-1.306.73-1.767l1.1-1.291M18 21v-7.5a.75.75 0 0 0-.75-.75h-3a.75.75 0 0 0-.75.75V21m-4.5 0H2.36m11.14 0H18m0 0h2.64m-2.64 0l1.1-1.291c.414-.414.414-1.083 0-1.497l-1.1-1.291M18 21v-3.328c0-.68.27-1.306.73-1.767l1.1-1.291m0 0l-1.1 1.291m1.1-1.291L19.1 16.24c.414-.414.414-1.083 0-1.497l-1.1-1.291M2.36 21c.62 0 1.18-.034 1.71-.1H2.36m13.32 0a1.14 1.14 0 0 0 1.71-.1h-1.71M2.36 21c.62 0 1.18-.034 1.71-.1H2.36m13.32 0a1.14 1.14 0 0 0 1.71-.1h-1.71M2.36 21c.62 0 1.18-.034 1.71-.1H2.36m9.84-9.924c.414-.414.414-1.083 0-1.497l-1.1-1.291c-.414-.414-1.083-.414-1.497 0l-1.1 1.291c-.414.414-.414 1.083 0 1.497l1.1 1.291c.414.414 1.083.414 1.497 0l1.1-1.291M4.07 20.9c.62.066 1.18.1 1.71.1H4.07m9.84-9.924c.414-.414.414-1.083 0-1.497l-1.1-1.291c-.414-.414-1.083-.414-1.497 0l-1.1 1.291c-.414.414-.414 1.083 0 1.497l1.1 1.291c.414.414 1.083.414 1.497 0l1.1-1.291M4.07 20.9c.62.066 1.18.1 1.71.1H4.07m9.84-9.924c.414-.414.414-1.083 0-1.497l-1.1-1.291c-.414-.414-1.083-.414-1.497 0l-1.1 1.291c-.414.414-.414 1.083 0 1.497l1.1 1.291c.414.414 1.083.414 1.497 0l1.1-1.291M4.07 20.9v-3.328c0-.68.27-1.306.73-1.767l1.1-1.291c.414-.414.414-1.083 0-1.497l-1.1-1.291c-.414-.414-1.083-.414-1.497 0l-1.1 1.291c-.414.414-.414 1.083 0 1.497l1.1 1.291c.414.414 1.083.414 1.497 0l1.1-1.291m0 0l-1.1 1.291m1.1-1.291L5.17 16.24c.414-.414.414-1.083 0-1.497l-1.1-1.291m0 0L2.97 12.16c-.414-.414-.414-1.083 0-1.497l1.1-1.291m0 0L2.97 7.875c-.414-.414-.414-1.083 0-1.497L4.07 5.09c.414-.414 1.083-.414 1.497 0l1.1 1.291c.414.414.414 1.083 0 1.497L5.567 9.17c-.414.414-1.083.414-1.497 0L2.97 7.875m1.1 1.291L5.17 7.875m0 0L4.07 6.583c-.414-.414-1.083-.414-1.497 0L1.473 7.875c-.414.414-.414 1.083 0 1.497l1.1 1.291c.414.414 1.083.414 1.497 0l1.1-1.291" />
             </svg>
         </div>
         <h1>User Login</h1>${errorHtml} 
@@ -330,7 +359,6 @@ function renderLoginForm(req: Request): Response {
     return new Response(html, { headers: HTML_HEADERS });
 }
 
-// UPDATED: Added Login Icon
 function renderRegisterForm(req: Request): Response {
     const url = new URL(req.url);
     const error = url.searchParams.get("error");
@@ -357,6 +385,7 @@ function renderRegisterForm(req: Request): Response {
     return new Response(html, { headers: HTML_HEADERS });
 }
 
+// UPDATED: Admin Panel now includes Digital Sales History
 async function renderAdminPanel(token: string, message: string | null): Promise<Response> {
     let messageHtml = "";
     if (message) messageHtml = `<div class="success-msg">${decodeURIComponent(message)}</div>`;
@@ -383,6 +412,16 @@ async function renderAdminPanel(token: string, message: string | null): Promise<
     `).join('');
     
     const currentAnnouncement = await getAnnouncement() || "";
+    
+    // NEW: Get Sales History
+    const salesHistory = await getDigitalSalesHistory();
+    const salesHistoryHtml = salesHistory.map(s => `
+        <div class="voucher-item">
+            <span><strong>${s.username}</strong> bought <strong>${s.itemName}</strong></span>
+            <span class="voucher-value">${toMyanmarTime(s.timestamp)}</span>
+        </div>
+    `).join('');
+
 
     const html = `
         <!DOCTYPE html><html lang="my"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Admin Panel</title>
@@ -394,6 +433,7 @@ async function renderAdminPanel(token: string, message: string | null): Promise<
             .edit-btn { background-color:#007bff; color:white; padding:5px 10px; border-radius:4px; font-size: 14px; }
             .delete-btn { background-color:#dc3545; padding:5px 10px; font-size: 14px; }
             .voucher-code { font-weight: bold; background: #eee; padding: 3px 6px; border-radius: 4px; }
+            .history-list { max-height: 300px; overflow-y: auto; background-color: #fcfcfc; border: 1px solid #eee; padding: 10px; border-radius: 8px; }
         </style></head>
         <body><div class="container" style="max-width: 700px;">
             ${messageHtml}
@@ -428,7 +468,12 @@ async function renderAdminPanel(token: string, message: string | null): Promise<
                 <button type="submit" class="admin">Adjust Balance</button>
             </form><br>
             <form action="/admin/reset_password" method="POST"><input type="hidden" name="token" value="${token}"><label>User Name (for Reset):</label><input type="text" name="name" required><br><br><label>New Password:</label><input type="text" name="new_password" required><br><br><button type="submit" class="reset">Reset Password</button></form><br>
-            <form action="/admin/toggle_block" method="POST"><input type="hidden" name="token" value="${token}"><label>User Name (to Block/Unblock):</label><input type="text" name="name" required><br><br><button type="submit" style="background-color:#555;">Toggle Block Status</button></form>
+            <form action="/admin/toggle_block" method="POST"><input type="hidden" name="token" value="${token}"><label>User Name (to Block/Unblock):</label><input type="text" name="name" required><br><br><button type="submit" style="background-color:#555;">Toggle Block Status</button></form><hr>
+
+            <h2>Digital Sales History</h2>
+            <div class="history-list">
+                ${salesHistoryHtml.length > 0 ? salesHistoryHtml : '<p>No digital items sold yet.</p>'}
+            </div>
         </div></body></html>`;
     return new Response(html, { headers: HTML_HEADERS });
 }
@@ -617,8 +662,10 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
             .profile-header { display: flex; align-items: center; margin-bottom: 20px; }
             .avatar { width: 60px; height: 60px; border-radius: 50%; background-color: #eee; margin-right: 15px; display: flex; justify-content: center; align-items: center; overflow: hidden; }
             .avatar svg { width: 32px; height: 32px; color: #aaa; }
-            .profile-info { flex-grow: 1; }
-            .profile-name { font-size: 1.8em; font-weight: 600; color: #333; margin: 0; }
+            /* FIXED: Alignment */
+            .profile-info { display: flex; align-items: center; gap: 10px; } 
+            .profile-name { font-size: 1.8em; font-weight: 600; color: #333; margin: 0; user-select: all; }
+            .copy-btn-small { background: #007bff; color: white; border: none; padding: 5px 10px; font-size: 12px; border-radius: 5px; cursor: pointer; }
             
             .form-box { margin-bottom: 25px; background: #f9f9f9; padding: 20px; border-radius: 8px; }
             .form-box h2 { margin-top: 0; }
@@ -655,7 +702,10 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A1.875 1.875 0 0 1 18 22.5H6c-.98 0-1.813-.73-1.93-1.703a1.875 1.875 0 0 1 .03-1.179Z" /></svg>
             </div>
             <div class="profile-info">
-                <h1 class="profile-name">${user.username}</h1>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <h1 class="profile-name" id="username-text">${user.username}</h1>
+                    <button class="copy-btn-small" onclick="copyToClipboard('username-text', this)">Copy</button>
+                </div>
             </div>
         </div>
         
