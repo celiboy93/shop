@@ -12,6 +12,7 @@ interface User {
     passwordHash: string;
     balance: number;
     isBlocked?: boolean; 
+    receivedBonus: boolean; // NEW: To track global bonus
 }
 interface Transaction {
     type: "topup" | "purchase";
@@ -45,7 +46,6 @@ interface Voucher {
 interface Announcement {
     message: string;
 }
-// NEW: Data structure for Payment Info
 interface PaymentInfo {
     instructions: string;
     telegramUser: string;
@@ -55,6 +55,11 @@ interface PaymentInfo {
     waveLogoUrl: string;
     waveNumber: string;
     waveName: string;
+}
+// NEW: Global Bonus Structure
+interface GlobalBonus {
+    isActive: boolean;
+    amount: number;
 }
 
 // ----------------------------------------------------
@@ -80,15 +85,33 @@ async function getUserByUsername(username: string): Promise<User | null> {
     return result.value;
 }
 
+// UPDATED: registerUser now handles global bonus
 async function registerUser(username: string, passwordHash: string): Promise<boolean> {
+    const bonus = await getGlobalBonus();
+    let startBalance = 0;
+    let hasReceived = false;
+
+    if (bonus && bonus.isActive) {
+        startBalance = bonus.amount;
+        hasReceived = true;
+    }
+
     const user: User = { 
         username, 
         passwordHash, 
-        balance: 0, 
-        isBlocked: false 
+        balance: startBalance, 
+        isBlocked: false,
+        receivedBonus: hasReceived // Set bonus status on creation
     };
+    
     const key = ["users", username];
     const res = await kv.atomic().check({ key, versionstamp: null }).set(key, user).commit();
+    
+    // Log the welcome bonus if given
+    if (res.ok && startBalance > 0) {
+        await logTransaction(username, startBalance, "topup", "Welcome Bonus");
+    }
+    
     return res.ok;
 }
 
@@ -287,7 +310,7 @@ async function setAnnouncement(message: string): Promise<void> {
     }
 }
 
-// --- NEW: Payment Info KV Functions ---
+// --- Payment Info KV Functions ---
 async function getPaymentInfo(): Promise<PaymentInfo | null> {
     const key = ["payment_info"];
     const result = await kv.get<PaymentInfo>(key);
@@ -298,6 +321,23 @@ async function setPaymentInfo(info: PaymentInfo): Promise<void> {
     const key = ["payment_info"];
     await kv.set(key, info);
 }
+
+// --- NEW: Global Bonus KV Functions ---
+async function getGlobalBonus(): Promise<GlobalBonus | null> {
+    const key = ["global_bonus"];
+    const result = await kv.get<GlobalBonus>(key);
+    return result.value;
+}
+
+async function setGlobalBonus(amount: number): Promise<void> {
+    const key = ["global_bonus"];
+    if (amount > 0) {
+        await kv.set(key, { amount: amount, isActive: true });
+    } else {
+        await kv.set(key, { amount: 0, isActive: false });
+    }
+}
+
 
 // ----------------------------------------------------
 // Authentication Helpers
@@ -407,6 +447,7 @@ function renderRegisterForm(req: Request): Response {
     return new Response(html, { headers: HTML_HEADERS });
 }
 
+// UPDATED: Admin Panel now includes Global Bonus
 async function renderAdminPanel(token: string, message: string | null): Promise<Response> {
     let messageHtml = "";
     if (message) messageHtml = `<div class="success-msg">${decodeURIComponent(message)}</div>`;
@@ -433,7 +474,8 @@ async function renderAdminPanel(token: string, message: string | null): Promise<
     `).join('');
     
     const currentAnnouncement = await getAnnouncement() || "";
-    const pInfo = await getPaymentInfo(); // Get current payment info
+    const pInfo = await getPaymentInfo();
+    const currentBonus = await getGlobalBonus();
     
     const salesHistory = await getDigitalSalesHistory();
     const salesHistoryHtml = salesHistory.map(s => `
@@ -459,6 +501,14 @@ async function renderAdminPanel(token: string, message: string | null): Promise<
         <body><div class="container" style="max-width: 700px;">
             ${messageHtml}
             
+            <h2>Global Bonus Event</h2>
+            <form action="/admin/set_global_bonus" method="POST">
+                <input type="hidden" name="token" value="${token}">
+                <label>Bonus Amount (Set to 0 to disable):</label>
+                <input type="number" name="amount" value="${currentBonus?.isActive ? currentBonus.amount : '0'}" required><br><br>
+                <button type="submit" class="admin">Set Global Bonus</button>
+            </form><hr>
+
             <h2>Set Payment Info</h2>
             <form action="/admin/set_payment_info" method="POST">
                 <input type="hidden" name="token" value="${token}">
@@ -642,9 +692,7 @@ async function handleDashboard(user: User): Promise<Response> {
     return new Response(html, { headers: HTML_HEADERS });
 }
 
-// ----------------------------------------------------
-// (!!!!) USER INFO FUNCTION - UI UPDATED (!!!!)
-// ----------------------------------------------------
+// UPDATED: User Info UI (Alignment, Scroll, Inline Redeem, How to Top Up, Purchased Codes)
 async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
     const transactions = await getTransactions(user.username);
     
@@ -688,13 +736,13 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
             `;
         }).join('');
 
-    // NEW: Get dynamic payment info
+    // Get dynamic payment info
     const paymentInfo = await getPaymentInfo();
     let paymentHtml = `<div class="form-box payment-info"><p>Admin has not set up payment info yet.</p></div>`; // Default
     if (paymentInfo) {
         paymentHtml = `
         <div class="form-box payment-info">
-            <h2>${paymentInfo.instructions ? 'ငွေဖြည့်နည်း' : ''}</h2>
+            <h2>ငွေဖြည့်နည်း</h2>
             <p style="margin-top:0; color:#555;">${paymentInfo.instructions || ''}</p>
             <div class="payment-list">
                 <a href="https://t.me/${paymentInfo.telegramUser}" target="_blank" class="telegram-link">
@@ -754,8 +802,8 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
             .payment-info { background: #fffbe6; border: 1px solid #ffeeba; border-radius: 8px; padding: 20px; }
             .payment-info h2 { margin-top: 0; }
             .payment-list { padding-left: 0; list-style: none; margin-top: 15px; }
-            /* FIXED: Alignment for Payment */
             .payment-account { display: grid; grid-template-columns: 80px auto; /* 80px logo */ align-items: center; margin-bottom: 12px; font-size: 1.1em; }
+            .payment-account strong { font-weight: 600; color: #333; }
             .payment-account .logo { height: 25px; width: auto; }
             .payment-account .details { display: flex; flex-direction: column; }
             .payment-account .number { font-weight: 600; color: #0056b3; }
@@ -860,6 +908,17 @@ async function handleAuth(formData: FormData): Promise<Response> {
         return new Response("Redirecting...", { status: 302, headers });
     }
     
+    // NEW: Check for global bonus on login
+    const bonus = await getGlobalBonus();
+    if (bonus && bonus.isActive && !user.receivedBonus) {
+        const success = await updateUserBalance(username, bonus.amount);
+        if (success) {
+            await logTransaction(username, bonus.amount, "topup", "Event Bonus");
+            user.receivedBonus = true;
+            await kv.set(["users", user.username], user); // Save updated user
+        }
+    }
+    
     const headers = createSession(username, remember); 
     return new Response("Login successful. Redirecting...", { status: 302, headers });
 }
@@ -872,7 +931,7 @@ async function handleRegister(formData: FormData): Promise<Response> {
     if (!username || !password) return new Response("Missing username or password.", { status: 400 });
 
     const passwordHash = password; 
-    const success = await registerUser(username, passwordHash);
+    const success = await registerUser(username, passwordHash); // registerUser now handles bonus
 
     if (success) {
         const headers = createSession(username, remember); 
@@ -1173,7 +1232,6 @@ async function handleSetAnnouncement(formData: FormData): Promise<Response> {
     return new Response("Redirecting...", { status: 302, headers });
 }
 
-// NEW: Handler for setting payment info
 async function handleSetPaymentInfo(formData: FormData): Promise<Response> {
     const token = formData.get("token")?.toString();
     const info: PaymentInfo = {
@@ -1191,6 +1249,24 @@ async function handleSetPaymentInfo(formData: FormData): Promise<Response> {
     
     const headers = new Headers();
     headers.set("Location", `/admin/panel?token=${token}&message=${encodeURIComponent("Payment info updated!")}`);
+    return new Response("Redirecting...", { status: 302, headers });
+}
+
+// NEW: Handler for Global Bonus
+async function handleSetGlobalBonus(formData: FormData): Promise<Response> {
+    const amountStr = formData.get("amount")?.toString();
+    const amount = amountStr ? parseInt(amountStr) : NaN;
+    const token = formData.get("token")?.toString();
+    
+    if (isNaN(amount) || amount < 0) {
+        return renderMessagePage("Error", "Invalid amount.", true, `/admin/panel?token=${token}`);
+    }
+
+    await setGlobalBonus(amount);
+    const message = amount > 0 ? `Global Bonus set to ${amount} Ks!` : "Global Bonus disabled.";
+    
+    const headers = new Headers();
+    headers.set("Location", `/admin/panel?token=${token}&message=${encodeURIComponent(message)}`);
     return new Response("Redirecting...", { status: 302, headers });
 }
 
@@ -1290,7 +1366,8 @@ async function handler(req: Request): Promise<Response> {
         if (pathname === "/admin/create_voucher") return await handleCreateVoucher(formData); 
         if (pathname === "/admin/set_announcement") return await handleSetAnnouncement(formData); 
         if (pathname === "/admin/toggle_block") return await handleToggleBlock(formData);
-        if (pathname === "/admin/set_payment_info") return await handleSetPaymentInfo(formData); // NEW
+        if (pathname === "/admin/set_payment_info") return await handleSetPaymentInfo(formData); 
+        if (pathname === "/admin/set_global_bonus") return await handleSetGlobalBonus(formData); // NEW
     }
 
     // --- Default Route (Redirect all other requests to login) ---
