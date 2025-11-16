@@ -28,7 +28,7 @@ interface Product {
 // Core Helper Functions
 // ----------------------------------------------------
 
-// NEW: Helper to format numbers with commas
+// Helper to format numbers with commas
 function formatCurrency(amount: number): string {
     return amount.toLocaleString('en-US');
 }
@@ -79,7 +79,7 @@ async function getTransactions(username: string): Promise<Transaction[]> {
     return transactions;
 }
 
-// --- Product KV Functions (NEW) ---
+// --- Product KV Functions ---
 async function getProducts(): Promise<Product[]> {
     const entries = kv.list<Product>({ prefix: ["products"] });
     const products: Product[] = [];
@@ -174,7 +174,6 @@ function renderRegisterForm(req: Request): Response {
     return new Response(html, { headers: { "Content-Type": "text/html" } });
 }
 
-// UPDATED: Admin Panel now includes Product List
 async function renderAdminPanel(token: string, message: string | null): Promise<Response> {
     let messageHtml = "";
     if (message === "topup_success") messageHtml = `<div class="success-msg">User balance updated!</div>`;
@@ -234,7 +233,6 @@ async function renderAdminPanel(token: string, message: string | null): Promise<
     return new Response(html, { headers: { "Content-Type": "text/html" } });
 }
 
-// NEW: Page to edit a product
 async function renderEditProductPage(token: string, product: Product): Promise<Response> {
     const html = `
         <!DOCTYPE html><html lang="my"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Edit Product</title><style>${globalStyles} button.product{background-color:#ffc107; color:black; width:100%;}</style></head>
@@ -456,7 +454,6 @@ async function handleAddProduct(formData: FormData): Promise<Response> {
     return new Response("Redirecting...", { status: 302, headers });
 }
 
-// NEW: Handler to update a product
 async function handleUpdateProduct(formData: FormData): Promise<Response> {
     const productId = formData.get("productId")?.toString();
     const name = formData.get("name")?.toString();
@@ -477,7 +474,6 @@ async function handleUpdateProduct(formData: FormData): Promise<Response> {
     return new Response("Redirecting...", { status: 302, headers });
 }
 
-// NEW: Handler to delete a product
 async function handleDeleteProduct(formData: FormData): Promise<Response> {
     const productId = formData.get("productId")?.toString();
     const token = formData.get("token")?.toString();
@@ -503,70 +499,73 @@ function handleLogout(): Response {
 }
 
 // ----------------------------------------------------
-// Main Server Router (FIXED for Admin POST)
+// Main Server Router (FIXED)
 // ----------------------------------------------------
 
 async function handler(req: Request): Promise<Response> {
     const url = new URL(req.url);
     const pathname = url.pathname;
     
-    // --- Public Routes ---
-    if (pathname === "/login") return renderLoginForm();
-    if (pathname === "/register") return renderRegisterForm(req);
-    if (pathname === "/auth" && req.method === "POST") return handleAuth(req);
-    if (pathname === "/doregister" && req.method === "POST") return handleRegister(req);
-    if (pathname === "/logout") return handleLogout();
+    // --- Public GET Routes ---
+    if (req.method === "GET") {
+        if (pathname === "/login") return renderLoginForm();
+        if (pathname === "/register") return renderRegisterForm(req);
+        if (pathname === "/logout") return handleLogout();
+
+        // --- Admin GET Routes ---
+        const token = url.searchParams.get("token");
+        if (pathname === "/admin/panel") {
+            if (token !== ADMIN_TOKEN) return renderMessagePage("Error", "Unauthorized.", true);
+            const message = url.searchParams.get("message");
+            return await renderAdminPanel(token, message); 
+        }
+        if (pathname === "/admin/edit_product") {
+            if (token !== ADMIN_TOKEN) return renderMessagePage("Error", "Unauthorized.", true);
+            const productId = url.searchParams.get("id");
+            if (!productId) return renderMessagePage("Error", "Missing product ID.", true, `/admin/panel?token=${token}`);
+            const product = await getProductById(productId);
+            if (!product) return renderMessagePage("Error", "Product not found.", true, `/admin/panel?token=${token}`);
+            return await renderEditProductPage(token, product);
+        }
+
+        // --- Protected User GET Routes ---
+        const username = getUsernameFromCookie(req);
+        if (pathname === "/dashboard") {
+            if (!username) return handleLogout();
+            return await handleDashboard(username);
+        }
+        if (pathname === "/user-info") {
+            if (!username) return handleLogout();
+            return await handleUserInfoPage(username);
+        }
+    }
     
-    // --- Admin Routes (GET) ---
-    const token = url.searchParams.get("token");
-    if (pathname === "/admin/panel") {
-        if (token !== ADMIN_TOKEN) return renderMessagePage("Error", "Unauthorized.", true);
-        const message = url.searchParams.get("message");
-        return await renderAdminPanel(token, message); 
-    }
-    if (pathname === "/admin/edit_product") {
-        if (token !== ADMIN_TOKEN) return renderMessagePage("Error", "Unauthorized.", true);
-        const productId = url.searchParams.get("id");
-        if (!productId) return renderMessagePage("Error", "Missing product ID.", true, `/admin/panel?token=${token}`);
-        const product = await getProductById(productId);
-        if (!product) return renderMessagePage("Error", "Product not found.", true, `/admin/panel?token=${token}`);
-        return await renderEditProductPage(token, product);
-    }
-    
-    // --- Protected User Routes (GET) ---
-    const username = getUsernameFromCookie(req);
-    if (pathname === "/dashboard") {
-        if (!username) return handleLogout();
-        return await handleDashboard(username);
-    }
-    if (pathname === "/user-info") {
-        if (!username) return handleLogout();
-        return await handleUserInfoPage(username);
-    }
-    
-    // --- POST Routes (Admin and User) ---
+    // --- POST Routes ---
     if (req.method === "POST") {
-        const formData = await req.formData();
-        const postToken = formData.get("token")?.toString();
-
-        // Admin POST Actions
-        if (postToken === ADMIN_TOKEN) {
-            if (pathname === "/admin/topup") return handleAdminTopUp(formData);
-            if (pathname === "/admin/add_product") return handleAddProduct(formData);
-            if (pathname === "/admin/update_product") return handleUpdateProduct(formData);
-            if (pathname === "/admin/delete_product") return handleDeleteProduct(formData);
-        }
-        
-        // User POST Actions
+        // User POST (does not need token)
+        if (pathname === "/auth") return handleAuth(req);
+        if (pathname === "/doregister") return handleRegister(req);
         if (pathname === "/buy") {
-            const postUsername = getUsernameFromCookie(req);
-            if (!postUsername) return handleLogout();
-            // We need to re-pass the original req, not the consumed formData
-            return handleBuy(req, postUsername); 
+            const username = getUsernameFromCookie(req);
+            if (!username) return handleLogout();
+            return handleBuy(req, username);
+Gallery
         }
+
+        // Admin POST (requires token)
+        const formData = await req.formData();
+        const token = formData.get("token")?.toString();
+        if (token !== ADMIN_TOKEN) {
+            return renderMessagePage("Error", "Unauthorized: Invalid Token.", true);
+        }
+
+        if (pathname === "/admin/topup") return handleAdminTopUp(formData);
+        if (pathname === "/admin/add_product") return handleAddProduct(formData);
+        if (pathname === "/admin/update_product") return handleUpdateProduct(formData);
+        if (pathname === "/admin/delete_product") return handleDeleteProduct(formData);
     }
 
-    // --- Default Route ---
+    // --- Default Route (Redirect all other requests to login) ---
     const headers = new Headers();
     headers.set("Location", "/login");
     return new Response("Redirecting to /login...", { status: 302, headers });
