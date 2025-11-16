@@ -26,8 +26,8 @@ interface Product {
     price: number; 
     salePrice?: number | null;
     imageUrl: string; 
-    isDigital: boolean; // NEW: Is this a physical item or digital stock?
-    stock: string[]; // NEW: List of available codes/accounts
+    isDigital: boolean; 
+    stock: string[]; 
 }
 interface Voucher {
     code: string; 
@@ -183,7 +183,7 @@ async function getProductById(id: string): Promise<{value: Product, versionstamp
 
 async function addProduct(name: string, price: number, salePrice: number | null, imageUrl: string, isDigital: boolean, stock: string[]): Promise<boolean> {
     const id = Date.now().toString(); 
-    const product: Product = { id, name, price, salePrice, imageUrl, isDigital, stock };
+    const product: Product = { id, name, price, salePrice, imageUrl, isDigital, stock: stock || [] };
     const key = ["products", id];
     const res = await kv.set(key, product);
     return res.ok;
@@ -191,7 +191,7 @@ async function addProduct(name: string, price: number, salePrice: number | null,
 
 async function updateProduct(id: string, name: string, price: number, salePrice: number | null, imageUrl: string, isDigital: boolean, stock: string[]): Promise<boolean> {
     const key = ["products", id];
-    const product: Product = { id, name, price, salePrice, imageUrl, isDigital, stock };
+    const product: Product = { id, name, price, salePrice, imageUrl, isDigital, stock: stock || [] };
     const res = await kv.set(key, product);
     return res.ok;
 }
@@ -330,17 +330,14 @@ function renderRegisterForm(req: Request): Response {
     return new Response(html, { headers: HTML_HEADERS });
 }
 
-// UPDATED: Admin Panel now includes Stock Management
 async function renderAdminPanel(token: string, message: string | null): Promise<Response> {
     let messageHtml = "";
     if (message) messageHtml = `<div class="success-msg">${decodeURIComponent(message)}</div>`;
 
     const products = await getProducts();
-    const productListHtml = products.map(p => {
-        const stockInfo = p.isDigital ? `<strong>(${p.stock.length} in stock)</strong>` : '';
-        return `
+    const productListHtml = products.map(p => `
         <div class="product-item">
-            <span>${p.name} ${stockInfo} ${p.salePrice ? `<strong style="color:red;">(Sale)</strong>` : ''}</span>
+            <span>${p.name} ${p.isDigital ? `<strong>(${p.stock.length} left)</strong>` : ''} ${p.salePrice ? `<strong style="color:red;">(Sale)</strong>` : ''}</span>
             <div class"actions">
                 <a href="/admin/edit_product?token=${token}&id=${p.id}" class="edit-btn">Edit</a>
                 <form method="POST" action="/admin/delete_product" style="display:inline;" onsubmit="return confirm('Delete ${p.name}?');">
@@ -348,7 +345,7 @@ async function renderAdminPanel(token: string, message: string | null): Promise<
                 </form>
             </div>
         </div>
-    `}).join('');
+    `).join('');
 
     const vouchers = await getUnusedVouchers();
     const voucherListHtml = vouchers.map(v => `
@@ -373,7 +370,7 @@ async function renderAdminPanel(token: string, message: string | null): Promise<
         </style></head>
         <body><div class="container" style="max-width: 700px;">
             ${messageHtml}
-            <h2>Site Announcement</h2>
+            <h2>Site Announcement (Marquee)</h2>
             <form action="/admin/set_announcement" method="POST"><input type="hidden" name="token" value="${token}"><label>Message (leave empty to remove):</label><input type="text" name="message" value="${currentAnnouncement}"><br><br><button type="submit" class="announcement">Set Announcement</button></form><hr>
 
             <h2>Generate Voucher Code</h2>
@@ -409,9 +406,7 @@ async function renderAdminPanel(token: string, message: string | null): Promise<
     return new Response(html, { headers: HTML_HEADERS });
 }
 
-// UPDATED: Admin Edit Page now includes Stock
 async function renderEditProductPage(token: string, product: Product): Promise<Response> {
-    // Convert stock array back to string for textarea
     const stockString = product.stock ? product.stock.join('\n') : '';
 
     const html = `
@@ -448,7 +443,6 @@ function renderMessagePage(title: string, message: string, isError = false, back
     return new Response(html, { status: isError ? 400 : 200, headers: HTML_HEADERS });
 }
 
-// UPDATED: Dashboard now shows "Out of Stock"
 async function handleDashboard(user: User): Promise<Response> {
     const products = await getProducts();
     const announcement = await getAnnouncement(); 
@@ -462,7 +456,7 @@ async function handleDashboard(user: User): Promise<Response> {
     const productListHtml = products.map(product => {
         const hasSale = product.salePrice && product.salePrice > 0;
         const displayPrice = hasSale ? product.salePrice : product.price;
-        const isOutOfStock = product.isDigital && product.stock.length === 0;
+        const isOutOfStock = product.isDigital && (!product.stock || product.stock.length === 0);
 
         const priceHtml = hasSale
             ? `<div class="product-price sale">
@@ -552,7 +546,7 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
 
     let messageHtml = "";
     if (message === "redeem_success") messageHtml = `<div class="success-msg">Success! ${formatCurrency(parseInt(value || "0"))} Ks was added to your balance.</div>`;
-    if (message === "transfer_success") messageHtml = `<div class"success-msg">Success! You sent ${formatCurrency(parseInt(value || "0"))} Ks to ${recipient}.</div>`;
+    if (message === "transfer_success") messageHtml = `<div class="success-msg">Success! You sent ${formatCurrency(parseInt(value || "0"))} Ks to ${recipient}.</div>`;
     if (error) messageHtml = `<div class="error" style="margin-top: 15px;">${decodeURIComponent(error)}</div>`;
 
     function toMyanmarTime(utcString: string): string {
@@ -560,10 +554,7 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
         catch (e) { return utcString; }
     }
 
-    // Get *all* purchase history
     const allPurchases = transactions.filter(t => t.type === 'purchase');
-
-    // Separate "digital" from "normal" purchases
     const digitalPurchases = allPurchases.filter(t => t.itemDetails);
     const normalPurchases = allPurchases.filter(t => !t.itemDetails);
 
@@ -574,10 +565,22 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
         .map(t => `<li class="purchase"><span>${t.itemName.includes('Transfer to') ? t.itemName : `Bought <strong>${t.itemName || 'an item'}</strong>`} for <strong>${formatCurrency(Math.abs(t.amount))} Ks</strong></span><span class="time">${toMyanmarTime(t.timestamp)}</span></li>`)
         .join('');
 
-    // NEW: List of purchased digital codes
     const digitalCodesHtml = digitalPurchases
-        .map(t => `<li class="purchase"><span><strong>${t.itemName}</strong> Code: <code class="voucher-code">${t.itemDetails}</code></span><span class="time">${toMyanmarTime(t.timestamp)}</span></li>`)
-        .join('');
+        .map((t, index) => {
+            const codeId = `code-${index}`;
+            return `
+            <li class="purchase">
+                <div style="flex-grow: 1;">
+                    <strong>${t.itemName}</strong><br>
+                    <code class="voucher-code" id="${codeId}">${t.itemDetails}</code>
+                </div>
+                <div class="actions">
+                    <span class="time">${toMyanmarTime(t.timestamp)}</span>
+                    <button class="copy-btn" onclick="copyToClipboard('${codeId}', this)">Copy</button>
+                </div>
+            </li>
+            `;
+        }).join('');
 
 
     const html = `
@@ -602,8 +605,9 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
             .history li { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; padding: 12px; background: #fff; border: 1px solid #eee; border-radius: 8px; border-left-width: 5px; }
             .history li.topup { border-left-color: #28a745; }
             .history li.purchase { border-left-color: #ffc107; }
-            .history li .time { font-size: 0.9em; color: #777; }
-            .voucher-code { font-weight: bold; background: #eee; padding: 3px 6px; border-radius: 4px; }
+            .history li .time { font-size: 0.9em; color: #777; display: block; margin-bottom: 5px; }
+            .voucher-code { font-size: 1.1em; color: #d63384; user-select: all; }
+            .copy-btn { background-color: #007bff; color: white; border: none; padding: 5px 10px; border-radius: 5px; font-size: 12px; cursor: pointer; }
 
             .payment-info { background: #fffbe6; border: 1px solid #ffeeba; border-radius: 8px; padding: 20px; }
             .payment-info h2 { margin-top: 0; }
@@ -676,7 +680,19 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
         
         <a href="/dashboard" style="display:block; text-align:center; margin-top:20px;">Back to Shop</a>
         
-        </div></body></html>`;
+        </div>
+        <script>
+            function copyToClipboard(elementId, buttonElement) {
+                const text = document.getElementById(elementId).innerText;
+                navigator.clipboard.writeText(text).then(() => {
+                    buttonElement.innerText = "Copied!";
+                    setTimeout(() => { buttonElement.innerText = "Copy"; }, 2000);
+                }, (err) => {
+                    alert("Failed to copy.");
+                });
+            }
+        </script>
+        </body></html>`;
     return new Response(html, { headers: HTML_HEADERS });
 }
 
@@ -765,11 +781,10 @@ async function handleBuy(formData: FormData, username: string): Promise<Response
 
     // --- Digital Stock Logic ---
     if (product.isDigital) {
-        if (product.stock.length === 0) {
+        if (!product.stock || product.stock.length === 0) {
             return renderMessagePage("Error", "Sorry, this item is Out of Stock.", true);
         }
         
-        // Atomically pop one item from stock
         const itemToSell = product.stock[0]; // Get the first item
         const newStock = product.stock.slice(1); // Get the rest of the items
         
@@ -779,7 +794,6 @@ async function handleBuy(formData: FormData, username: string): Promise<Response
             .commit();
             
         if (!atomicRes.ok) {
-            // Race condition: someone else bought it.
             return renderMessagePage("Error", "Item was just sold! Please try again.", true);
         }
         
@@ -787,21 +801,25 @@ async function handleBuy(formData: FormData, username: string): Promise<Response
     }
     // --- End Digital Stock Logic ---
 
-    // Deduct balance (this is safe now)
     const success = await updateUserBalance(username, -price); 
 
     if (success) {
-        // Log the transaction WITH the digital code
         await logTransaction(username, -price, "purchase", item, itemDetails); 
         const newBalance = (await getUserByUsername(username))?.balance ?? 0;
         
-        // Show the code/account on the success page
-        const detailsMessage = itemDetails ? `<br><br>Your purchased item details:<br><strong>${itemDetails}</strong>` : '';
-        const message = `You bought <strong>${item}</strong> for ${formatCurrency(price)} Ks.<br>Your new balance is <strong>${formatCurrency(newBalance)} Ks</strong>.${detailsMessage}`;
+        let detailsMessage = "";
+        let reminderMessage = "";
+
+        if (itemDetails) {
+            detailsMessage = `<br><br>Your purchased item details:<br><strong style="font-size: 1.2em; color: #d63384;">${itemDetails}</strong>`;
+            // NEW: Reminder text
+            reminderMessage = "<br><br><small>This page will auto-redirect. You can view this code again in your 'My Info' page.</small>";
+        }
+        
+        const message = `You bought <strong>${item}</strong> for ${formatCurrency(price)} Ks.<br>Your new balance is <strong>${formatCurrency(newBalance)} Ks</strong>.${detailsMessage}${reminderMessage}`;
         
         return renderMessagePage("Purchase Successful!", message, false); // Auto-redirects
     } else {
-        // Fallback error (should rarely happen)
         return renderMessagePage("Transaction Failed", "An unknown error occurred.", true);
     }
 }
@@ -843,7 +861,6 @@ async function handleAddProduct(formData: FormData): Promise<Response> {
     const token = formData.get("token")?.toString();
     const isDigital = formData.get("isDigital") === "on";
     const stockString = formData.get("stock")?.toString() || "";
-    // Convert textarea string (one per line) into an array
     const stock = isDigital ? stockString.split('\n').filter(s => s.trim() !== '') : [];
     
     const adminBackLink = `/admin/panel?token=${token}`;
@@ -878,7 +895,6 @@ async function handleUpdateProduct(formData: FormData): Promise<Response> {
         return renderMessagePage("Error", "Missing data for update.", true, adminBackLink);
     }
     
-    // Note: This replaces the stock, it doesn't add to it.
     await updateProduct(productId, name, price, salePrice, imageUrl, isDigital, stock);
     
     const headers = new Headers();
