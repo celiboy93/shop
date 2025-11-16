@@ -305,7 +305,7 @@ function renderRegisterForm(req: Request): Response {
 async function renderAdminPanel(token: string, message: string | null): Promise<Response> {
     let messageHtml = "";
     if (message === "topup_success") messageHtml = `<div class="success-msg">User balance updated!</div>`;
-    if (message === "product_added") messageHtml = `<div class"success-msg">Product added!</div>`;
+    if (message === "product_added") messageHtml = `<div class="success-msg">Product added!</div>`;
     if (message === "product_updated") messageHtml = `<div class="success-msg">Product updated!</div>`;
     if (message === "product_deleted") messageHtml = `<div class"success-msg" style="background-color:#f8d7da; color:#721c24;">Product deleted!</div>`;
     if (message === "pass_reset_success") messageHtml = `<div class="success-msg">User password reset successfully!</div>`;
@@ -438,7 +438,7 @@ async function handleDashboard(username: string): Promise<Response> {
             .product-name { font-size: 16px; font-weight: 600; color: #333; margin: 10px 0; }
             .product-price { font-size: 14px; font-weight: 600; color: #28a745; margin-bottom: 15px; }
             .buy-btn { background-color: #28a745; width: 100%; padding: 10px; font-size: 14px; }
-            /* NEW Marquee Style */
+            /* Marquee Style */
             .marquee-container { overflow: hidden; white-space: nowrap; background: #fffbe6; color: #856404; padding: 10px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #ffeeba; }
             .marquee-text { display: inline-block; padding-left: 100%; animation: marquee 15s linear infinite; }
             @keyframes marquee { 0% { transform: translateX(0); } 100% { transform: translateX(-100%); } }
@@ -493,7 +493,7 @@ async function handleUserInfoPage(req: Request, username: string): Promise<Respo
         messageHtml = `<div class="success-msg">Success! ${formatCurrency(parseInt(value || "0"))} Ks was added to your balance.</div>`;
     }
     if (message === "transfer_success") {
-        messageHtml = `<div class"success-msg">Success! You sent ${formatCurrency(parseInt(value || "0"))} Ks to ${recipient}.</div>`;
+        messageHtml = `<div class="success-msg">Success! You sent ${formatCurrency(parseInt(value || "0"))} Ks to ${recipient}.</div>`;
     }
     if (error) {
         messageHtml = `<div class="error" style="margin-top: 15px;">${decodeURIComponent(error)}</div>`;
@@ -515,18 +515,15 @@ async function handleUserInfoPage(req: Request, username: string): Promise<Respo
     const html = `
         <!DOCTYPE html><html lang="my"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>My Info</title>
         <style>${globalStyles}
-            /* NEW Profile Header */
+            /* Profile Header */
             .profile-header { display: flex; align-items: center; margin-bottom: 20px; }
             .avatar { width: 60px; height: 60px; border-radius: 50%; background-color: #eee; margin-right: 15px; display: flex; justify-content: center; align-items: center; overflow: hidden; }
             .avatar svg { width: 32px; height: 32px; color: #aaa; }
             .profile-info { flex-grow: 1; }
             /* FIXED: Alignment */
-            .profile-grid { display: grid; grid-template-columns: 90px auto; align-items: center; } 
-            .profile-label { font-size: 1.2em; font-weight: 600; color: #333; }
-            .profile-name { font-size: 1.2em; color: #555; }
-            .profile-balance { font-size: 1.2em; color: #007bff; font-weight: 700; }
+            .profile-name { font-size: 1.8em; font-weight: 600; color: #333; margin: 0; }
+            .profile-subtext { font-size: 1.1em; color: #555; }
             
-            /* NEW Form */
             .form-box { margin-bottom: 25px; background: #f9f9f9; padding: 20px; border-radius: 8px; }
             .form-box h2 { margin-top: 0; }
             .form-box input { width: 90%; }
@@ -535,7 +532,7 @@ async function handleUserInfoPage(req: Request, username: string): Promise<Respo
             
             .history { margin-top: 25px; }
             .history h2 { border-bottom: 1px solid #eee; padding-bottom: 5px; }
-            /* NEW SCROLL BOX */
+            /* Scroll Box */
             .history-list { max-height: 250px; overflow-y: auto; background-color: #fcfcfc; border: 1px solid #eee; padding: 10px; border-radius: 8px; }
             .history ul { padding-left: 0; list-style-type: none; margin: 0; }
             .history li { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; padding: 12px; background: #fff; border: 1px solid #eee; border-radius: 8px; border-left-width: 5px; }
@@ -552,10 +549,8 @@ async function handleUserInfoPage(req: Request, username: string): Promise<Respo
                 </svg>
             </div>
             <div class="profile-info">
-                <div class="profile-grid">
-                    <span class="profile-label">Username:</span> <span class="profile-name">${user.username}</span>
-                    <span class="profile-label">Balance:</span> <span class="profile-balance">${formatCurrency(user.balance)} Ks</span>
-                </div>
+                <h1 class="profile-name">${user.username}</h1>
+                <span class="profile-subtext">(Your Account Info)</span>
             </div>
         </div>
         <p style="font-size:0.9em; color:gray; text-align: center;">(For security, passwords are never shown.)</p>
@@ -844,6 +839,18 @@ async function handleCreateVoucher(formData: FormData): Promise<Response> {
     return new Response("Redirecting...", { status: 302, headers });
 }
 
+// NEW: Handler for setting announcement
+async function handleSetAnnouncement(formData: FormData): Promise<Response> {
+    const message = formData.get("message")?.toString() || "";
+    const token = formData.get("token")?.toString();
+    
+    await setAnnouncement(message);
+    
+    const headers = new Headers();
+    headers.set("Location", `/admin/panel?token=${token}&message=announcement_set`);
+    return new Response("Redirecting...", { status: 302, headers });
+}
+
 
 function handleLogout(): Response {
     const headers = new Headers();
@@ -924,6 +931,7 @@ async function handler(req: Request): Promise<Response> {
         if (pathname === "/admin/delete_product") return await handleDeleteProduct(formData);
         if (pathname === "/admin/reset_password") return await handleResetPassword(formData); 
         if (pathname === "/admin/create_voucher") return await handleCreateVoucher(formData); 
+        if (pathname === "/admin/set_announcement") return await handleSetAnnouncement(formData); // FIXED BUG
     }
 
     // --- Default Route (Redirect all other requests to login) ---
