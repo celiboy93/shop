@@ -303,9 +303,10 @@ async function handleDashboard(username: string): Promise<Response> {
             /* --- Nav Links (Moved to Top) --- */
             .nav-links { 
                 display: flex; 
-                justify-content: space-between; 
+                justify-content: space-between; /* Pushes to corners */
                 margin-bottom: 20px;
-                gap: 10px; /* Space between buttons */
+                margin-top: -10px; /* Pulls it up slightly */
+                gap: 10px; 
             }
             .nav-links a {
                 display: block;
@@ -314,10 +315,20 @@ async function handleDashboard(username: string): Promise<Response> {
                 text-align: center;
                 font-weight: 600;
                 text-decoration: none;
-                flex: 1; /* Make them share the space */
+                /* flex: 1; <-- REMOVED */
             }
-            .info-btn { background-color: #007bff; color: white; }
-            .logout-btn { background-color: #f8d7da; color: #dc3545; border: 1px solid #dc3545; }
+            /* UPDATED: Solid blue button */
+            .info-btn { 
+                background-color: #007bff; 
+                color: white; 
+                border: 1px solid #007bff;
+            }
+            /* UPDATED: Outline blue button */
+            .logout-btn { 
+                background-color: #ffffff; 
+                color: #007bff; 
+                border: 1px solid #007bff; 
+            }
 
             /* --- Other Styles --- */
             .balance-box { background: linear-gradient(90deg, #007bff, #0056b3); color: white; padding: 20px; border-radius: 12px; margin-bottom: 25px; text-align: center; }
@@ -347,8 +358,7 @@ async function handleDashboard(username: string): Promise<Response> {
             <div class="product-grid">
                 ${products.length > 0 ? productListHtml : '<p>No products available yet.</p>'}
             </div>
-            
-            </div>
+        </div>
         <script>
             function checkBalance(itemName, price, balance) {
                 if (balance < price) {
