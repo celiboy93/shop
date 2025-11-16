@@ -22,7 +22,7 @@ interface Product {
     id: string; 
     name: string; 
     price: number; 
-    salePrice?: number | null; // NEW: For Flash Sales
+    salePrice?: number | null; // For Flash Sales
     imageUrl: string; 
 }
 interface Voucher {
@@ -301,7 +301,6 @@ function renderRegisterForm(req: Request): Response {
     return new Response(html, { headers: HTML_HEADERS });
 }
 
-// UPDATED: Admin Panel now includes Flash Sale field
 async function renderAdminPanel(token: string, message: string | null): Promise<Response> {
     let messageHtml = "";
     if (message) messageHtml = `<div class="success-msg">${decodeURIComponent(message)}</div>`;
@@ -395,7 +394,6 @@ function renderMessagePage(title: string, message: string, isError = false, back
     return new Response(html, { status: isError ? 400 : 200, headers: HTML_HEADERS });
 }
 
-// UPDATED: Dashboard now shows Sale Prices
 async function handleDashboard(username: string): Promise<Response> {
     const user = await getUserByUsername(username);
     if (!user) return handleLogout(); 
@@ -410,11 +408,9 @@ async function handleDashboard(username: string): Promise<Response> {
     ` : '';
 
     const productListHtml = products.map(product => {
-        // Determine the price to show and use
         const hasSale = product.salePrice && product.salePrice > 0;
         const displayPrice = hasSale ? product.salePrice : product.price;
         
-        // Create the price HTML (show old price if on sale)
         const priceHtml = hasSale
             ? `<div class="product-price sale">
                  <del>${formatCurrency(product.price)} Ks</del> <strong>${formatCurrency(displayPrice)} Ks</strong>
@@ -489,7 +485,9 @@ async function handleDashboard(username: string): Promise<Response> {
     return new Response(html, { headers: HTML_HEADERS });
 }
 
-// UPDATED: User Info UI (Alignment, Scroll, Inline Redeem, How to Top Up)
+// ----------------------------------------------------
+// (!!!!) USER INFO FUNCTION - UI UPDATED (!!!!)
+// ----------------------------------------------------
 async function handleUserInfoPage(req: Request, username: string): Promise<Response> {
     const user = await getUserByUsername(username);
     if (!user) return handleLogout();
@@ -504,7 +502,7 @@ async function handleUserInfoPage(req: Request, username: string): Promise<Respo
 
     let messageHtml = "";
     if (message === "redeem_success") messageHtml = `<div class="success-msg">Success! ${formatCurrency(parseInt(value || "0"))} Ks was added to your balance.</div>`;
-    if (message === "transfer_success") messageHtml = `<div class"success-msg">Success! You sent ${formatCurrency(parseInt(value || "0"))} Ks to ${recipient}.</div>`;
+    if (message === "transfer_success") messageHtml = `<div class="success-msg">Success! You sent ${formatCurrency(parseInt(value || "0"))} Ks to ${recipient}.</div>`;
     if (error) messageHtml = `<div class="error" style="margin-top: 15px;">${decodeURIComponent(error)}</div>`;
 
     function toMyanmarTime(utcString: string): string {
@@ -522,13 +520,14 @@ async function handleUserInfoPage(req: Request, username: string): Promise<Respo
     const html = `
         <!DOCTYPE html><html lang="my"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>My Info</title>
         <style>${globalStyles}
+            /* Profile Header */
             .profile-header { display: flex; align-items: center; margin-bottom: 20px; }
             .avatar { width: 60px; height: 60px; border-radius: 50%; background-color: #eee; margin-right: 15px; display: flex; justify-content: center; align-items: center; overflow: hidden; }
             .avatar svg { width: 32px; height: 32px; color: #aaa; }
             .profile-info { flex-grow: 1; }
             .profile-name { font-size: 1.8em; font-weight: 600; color: #333; margin: 0; }
-            .profile-subtext { font-size: 1.1em; color: #555; }
             
+            /* Form Box */
             .form-box { margin-bottom: 25px; background: #f9f9f9; padding: 20px; border-radius: 8px; }
             .form-box h2 { margin-top: 0; }
             .form-box input { width: 90%; }
@@ -537,38 +536,63 @@ async function handleUserInfoPage(req: Request, username: string): Promise<Respo
             
             .history { margin-top: 25px; }
             .history h2 { border-bottom: 1px solid #eee; padding-bottom: 5px; }
+            /* Scroll Box */
             .history-list { max-height: 250px; overflow-y: auto; background-color: #fcfcfc; border: 1px solid #eee; padding: 10px; border-radius: 8px; }
             .history ul { padding-left: 0; list-style-type: none; margin: 0; }
             .history li { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; padding: 12px; background: #fff; border: 1px solid #eee; border-radius: 8px; border-left-width: 5px; }
             .history li.topup { border-left-color: #28a745; }
             .history li.purchase { border-left-color: #ffc107; }
             .history li .time { font-size: 0.9em; color: #777; }
-            
-            .payment-info { background: #fffbe6; border: 1px solid #ffeeba; border-radius: 8px; padding: 15px; }
-            .payment-info li { list-style: none; margin-bottom: 10px; display: flex; align-items: center; }
-            .payment-info svg { width: 20px; height: 20px; margin-right: 10px; color: #007bff; }
+
+            /* Payment Info Box */
+            .payment-info { background: #fffbe6; border: 1px solid #ffeeba; border-radius: 8px; padding: 20px; }
+            .payment-info h2 { margin-top: 0; }
+            .payment-list { padding-left: 0; list-style: none; margin-top: 15px; }
+            .payment-account { display: grid; grid-template-columns: 100px auto; /* FIXED: 100px label */ align-items: center; margin-bottom: 12px; font-size: 1.1em; }
+            .payment-account strong { font-weight: 600; color: #333; }
+            .payment-account .details { display: flex; flex-direction: column; }
+            .payment-account .number { font-weight: 600; color: #0056b3; }
+            .payment-account .name { font-size: 0.9em; color: #555; }
+            .telegram-link { display: flex; align-items: center; font-weight: 600; font-size: 1.1em; }
+            .telegram-link svg { width: 24px; height: 24px; margin-right: 8px; color: #0088cc; }
         </style></head>
         <body><div class="container">
         
         <div class="profile-header">
             <div class="avatar">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A1.875 1.875 0 0 1 18 22.5H6c-.98 0-1.813-.73-1.93-1.703a1.875 1.875 0 0 1 .03-1.179Z" /></svg>
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A1.875 1.875 0 0 1 18 22.5H6c-.98 0-1.813-.73-1.93-1.703a1.875 1.875 0 0 1 .03-1.179Z" />
+                </svg>
             </div>
             <div class="profile-info">
                 <h1 class="profile-name">${user.username}</h1>
-                <span class="profile-subtext">(Your Account Info)</span>
             </div>
         </div>
         
         ${messageHtml} <div class="form-box payment-info">
             <h2>How to Top Up</h2>
-            <p>Please transfer to one of the accounts below and redeem the voucher code provided by admin.</p>
-            <ul style="padding-left: 0;">
-                <li><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M19.467 1.817a1.68 1.68 0 0 0-1.57-.002L3.58 6.471A1.68 1.68 0 0 0 2.21 7.91v1.314a1.68 1.68 0 0 0 .58 1.258l5.96 4.708a.75.75 0 0 1 .31.623v5.04a.75.75 0 0 0 1.25.59L12 19.333l3.22 2.451a.75.75 0 0 0 1.25-.59v-5.04a.75.75 0 0 1 .31-.623l5.96-4.708a1.68 1.68 0 0 0 .58-1.258V7.91a1.68 1.68 0 0 0-1.37-1.443L19.467 1.817Z" /></svg>
-                <strong>Telegram:</strong> <a href="https://t.me/iqowoq" target="_blank">@iqowoq</a></li>
-                <li><strong>KPay:</strong> 09961650283 (thein naing win)</li>
-                <li><strong>Wave Pay:</strong> 09688171999 (thein naing win)</li>
-            </ul>
+            <p style="margin-top:0; color:#555;">Please transfer to one of the accounts below and redeem the voucher code provided by admin.</p>
+            <div class="payment-list">
+                <a href="https://t.me/iqowoq" target="_blank" class="telegram-link">
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M19.467 1.817a1.68 1.68 0 0 0-1.57-.002L3.58 6.471A1.68 1.68 0 0 0 2.21 7.91v1.314a1.68 1.68 0 0 0 .58 1.258l5.96 4.708a.75.75 0 0 1 .31.623v5.04a.75.75 0 0 0 1.25.59L12 19.333l3.22 2.451a.75.75 0 0 0 1.25-.59v-5.04a.75.75 0 0 1 .31-.623l5.96-4.708a1.68 1.68 0 0 0 .58-1.258V7.91a1.68 1.68 0 0 0-1.37-1.443L19.467 1.817Z" /></svg>
+                    <span>@iqowoq</span>
+                </a>
+                <hr style="border:0; border-top:1px solid #eee; margin: 15px 0;">
+                <div class="payment-account">
+                    <strong>KPay:</strong>
+                    <div class="details">
+                        <span class="number">09961650283</span>
+                        <span class="name">thein naing win</span>
+                    </div>
+                </div>
+                <div class="payment-account">
+                    <strong>Wave Pay:</strong>
+                    <div class="details">
+                        <span class="number">09688171999</span>
+                        <span class="name">thein naing win</span>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <div class="form-box">
@@ -650,8 +674,8 @@ async function handleRegister(formData: FormData): Promise<Response> {
     }
 }
 
-// UPDATED: handleBuy now uses Product ID
 async function handleBuy(formData: FormData, username: string): Promise<Response> {
+    // UPDATED: Now gets product from ID, not form
     const productId = formData.get("productId")?.toString();
     
     if (!productId) {
@@ -704,7 +728,6 @@ async function handleAdminTopUp(formData: FormData): Promise<Response> {
     }
 }
 
-// UPDATED: handleAddProduct now saves salePrice
 async function handleAddProduct(formData: FormData): Promise<Response> {
     const name = formData.get("name")?.toString();
     const priceStr = formData.get("price")?.toString();
@@ -726,7 +749,6 @@ async function handleAddProduct(formData: FormData): Promise<Response> {
     return new Response("Redirecting...", { status: 302, headers });
 }
 
-// UPDATED: handleUpdateProduct now saves salePrice
 async function handleUpdateProduct(formData: FormData): Promise<Response> {
     const productId = formData.get("productId")?.toString();
     const name = formData.get("name")?.toString();
