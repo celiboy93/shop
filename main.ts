@@ -9,14 +9,14 @@ const MYANMAR_TIMEZONE = "Asia/Yangon";
 // --- Data Structures ---
 interface User {
     username: string;
-    passwordHash: string; // WARNING: Storing plain text, not secure!
+    passwordHash: string;
     balance: number;
 }
 interface Transaction {
     type: "topup" | "purchase";
     amount: number;
-    timestamp: string; 
-    itemName?: string; 
+    timestamp: string; // Stored in UTC
+    itemName?: string; // Store the item name for purchases
 }
 interface Product {
     id: string; 
@@ -61,22 +61,6 @@ async function updateUserBalance(username: string, amountChange: number): Promis
         const res = await kv.atomic().check(result).set(key, { ...user, balance: newBalance }).commit();
         if (res.ok) return true; 
     }
-}
-
-// NEW: Admin function to reset a user's password
-async function resetUserPassword(username: string, newPasswordHash: string): Promise<boolean> {
-    const key = ["users", username];
-    const result = await kv.get<User>(key);
-    const user = result.value;
-
-    if (!user) return false; // User not found
-
-    // Update the password
-    user.passwordHash = newPasswordHash;
-    
-    // Save the updated user data
-    const res = await kv.atomic().check(result).set(key, user).commit();
-    return res.ok;
 }
 
 async function logTransaction(username: string, amount: number, type: "topup" | "purchase", itemName?: string): Promise<void> {
@@ -136,7 +120,6 @@ async function deleteProduct(id: string): Promise<void> {
 // ----------------------------------------------------
 
 function verifyPassword(inputPassword: string, storedHash: string): boolean {
-    // WARNING: This is NOT secure. Should use hashing.
     return inputPassword === storedHash;
 }
 
@@ -161,7 +144,7 @@ function createSession(username: string, remember: boolean): Headers {
 }
 
 // ----------------------------------------------------
-// HTML Render Functions (Pages)
+// HTML Render Functions (Pages) - NEW UI
 // ----------------------------------------------------
 
 const HTML_HEADERS = { "Content-Type": "text/html; charset=utf-8" };
@@ -175,7 +158,12 @@ const globalStyles = `
     button { background-color: #007bff; color: white; border: none; padding: 12px 20px; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: 600; width: 100%; }
     .error { color: #dc3545; background-color: #f8d7da; padding: 10px; border-radius: 5px; margin-bottom: 15px; }
     input[type="text"], input[type="password"], input[type="number"], input[type="url"] { 
-        width: 95%; padding: 12px 10px; margin-top: 5px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; 
+        width: 95%; 
+        padding: 12px 10px; 
+        margin-top: 5px; 
+        border: 1px solid #ddd; 
+        border-radius: 8px; 
+        font-size: 16px; 
     }
     label { font-weight: 600; color: #555; }
     .checkbox-container { display: flex; align-items: center; margin-top: 15px; }
@@ -216,7 +204,6 @@ function renderRegisterForm(req: Request): Response {
     return new Response(html, { headers: HTML_HEADERS });
 }
 
-// UPDATED: Admin Panel now includes Password Reset
 async function renderAdminPanel(token: string, message: string | null): Promise<Response> {
     let messageHtml = "";
     if (message === "topup_success") messageHtml = `<div class="success-msg">User balance updated!</div>`;
@@ -255,14 +242,8 @@ async function renderAdminPanel(token: string, message: string | null): Promise<
             <form action="/admin/add_product" method="POST"><input type="hidden" name="token" value="${token}"><label>Product Name:</label><input type="text" name="name" required><br><br><label>Price (Ks):</label><input type="number" name="price" required><br><br><label>Image URL (or Emoji):</label><input type="url" name="imageUrl" required><br><br><button type="submit" class="product">Add Product</button></form><hr>
             <h2>User Top-Up</h2>
             <form action="/admin/topup" method="POST"><input type="hidden" name="token" value="${token}"><label>User Name:</label><input type="text" name="name" required><br><br><label>Amount (Ks):</label><input type="number" name="amount" required><br><br><button type="submit" class="admin">Add Balance</button></form><hr>
-            
             <h2>Reset User Password</h2>
-            <form action="/admin/reset_password" method="POST">
-                <input type="hidden" name="token" value="${token}">
-                <label>User Name:</label><input type="text" name="name" required><br><br>
-                <label>New Password:</label><input type="text" name="new_password" required><br><br>
-                <button type="submit" class="reset">Reset Password</button>
-            </form>
+            <form action="/admin/reset_password" method="POST"><input type="hidden" name="token" value="${token}"><label>User Name:</label><input type="text" name="name" required><br><br><label>New Password:</label><input type="text" name="new_password" required><br><br><button type="submit" class="reset">Reset Password</button></form>
         </div></body></html>`;
     return new Response(html, { headers: HTML_HEADERS });
 }
@@ -295,6 +276,9 @@ function renderMessagePage(title: string, message: string, isError = false, back
     return new Response(html, { status: isError ? 400 : 200, headers: HTML_HEADERS });
 }
 
+// ----------------------------------------------------
+// (!!!!) DASHBOARD FUNCTION - UI UPDATED (!!!!)
+// ----------------------------------------------------
 async function handleDashboard(username: string): Promise<Response> {
     const user = await getUserByUsername(username);
     if (!user) return handleLogout(); 
@@ -316,6 +300,26 @@ async function handleDashboard(username: string): Promise<Response> {
     const html = `
         <!DOCTYPE html><html lang="my"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Shop</title>
         <style>${globalStyles}
+            /* --- Nav Links (Moved to Top) --- */
+            .nav-links { 
+                display: flex; 
+                justify-content: space-between; 
+                margin-bottom: 20px;
+                gap: 10px; /* Space between buttons */
+            }
+            .nav-links a {
+                display: block;
+                padding: 10px 15px;
+                border-radius: 8px;
+                text-align: center;
+                font-weight: 600;
+                text-decoration: none;
+                flex: 1; /* Make them share the space */
+            }
+            .info-btn { background-color: #007bff; color: white; }
+            .logout-btn { background-color: #f8d7da; color: #dc3545; border: 1px solid #dc3545; }
+
+            /* --- Other Styles --- */
             .balance-box { background: linear-gradient(90deg, #007bff, #0056b3); color: white; padding: 20px; border-radius: 12px; margin-bottom: 25px; text-align: center; }
             .balance-label { font-size: 16px; opacity: 0.9; }
             .balance-amount { font-size: 2.5em; font-weight: 700; letter-spacing: 1px; }
@@ -326,10 +330,15 @@ async function handleDashboard(username: string): Promise<Response> {
             .product-name { font-size: 16px; font-weight: 600; color: #333; margin: 10px 0; }
             .product-price { font-size: 14px; font-weight: 600; color: #28a745; margin-bottom: 15px; }
             .buy-btn { background-color: #28a745; width: 100%; padding: 10px; font-size: 14px; }
-            .nav-links { display: flex; justify-content: space-between; margin-top: 25px; }
         </style>
         </head>
         <body><div class="container" style="max-width: 800px;">
+            
+            <div class="nav-links">
+                <a href="/user-info" class="info-btn">My Info</a>
+                <a href="/logout" class="logout-btn">Logout</a>
+            </div>
+
             <div class="balance-box">
                 <div class="balance-label">Welcome, ${user.username}!</div>
                 <div class="balance-amount">${formatCurrency(user.balance)} Ks</div>
@@ -338,8 +347,8 @@ async function handleDashboard(username: string): Promise<Response> {
             <div class="product-grid">
                 ${products.length > 0 ? productListHtml : '<p>No products available yet.</p>'}
             </div>
-            <div class="nav-links"><a href="/user-info">My Info</a><a href="/logout" style="color:#dc3545;">Logout</a></div>
-        </div>
+            
+            </div>
         <script>
             function checkBalance(itemName, price, balance) {
                 if (balance < price) {
@@ -356,7 +365,6 @@ async function handleDashboard(username: string): Promise<Response> {
     return new Response(html, { headers: HTML_HEADERS });
 }
 
-// UPDATED: New UI for User Info
 async function handleUserInfoPage(username: string): Promise<Response> {
     const user = await getUserByUsername(username);
     if (!user) return handleLogout();
@@ -550,7 +558,6 @@ async function handleDeleteProduct(formData: FormData): Promise<Response> {
     return new Response("Redirecting...", { status: 302, headers });
 }
 
-// NEW: Handler to reset password
 async function handleResetPassword(formData: FormData): Promise<Response> {
     const username = formData.get("name")?.toString();
     const newPassword = formData.get("new_password")?.toString();
@@ -561,7 +568,6 @@ async function handleResetPassword(formData: FormData): Promise<Response> {
         return renderMessagePage("Error", "Missing username or new password.", true, adminBackLink);
     }
 
-    // WARNING: Storing plain text password. Not secure!
     const success = await resetUserPassword(username, newPassword);
 
     if (success) {
@@ -648,7 +654,7 @@ async function handler(req: Request): Promise<Response> {
         if (pathname === "/admin/add_product") return await handleAddProduct(formData);
         if (pathname === "/admin/update_product") return await handleUpdateProduct(formData);
         if (pathname === "/admin/delete_product") return await handleDeleteProduct(formData);
-        if (pathname === "/admin/reset_password") return await handleResetPassword(formData); // NEW
+        if (pathname === "/admin/reset_password") return await handleResetPassword(formData); 
     }
 
     // --- Default Route (Redirect all other requests to login) ---
