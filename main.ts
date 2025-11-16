@@ -276,9 +276,6 @@ function renderMessagePage(title: string, message: string, isError = false, back
     return new Response(html, { status: isError ? 400 : 200, headers: HTML_HEADERS });
 }
 
-// ----------------------------------------------------
-// (!!!!) DASHBOARD FUNCTION - UI UPDATED (!!!!)
-// ----------------------------------------------------
 async function handleDashboard(username: string): Promise<Response> {
     const user = await getUserByUsername(username);
     if (!user) return handleLogout(); 
@@ -300,37 +297,10 @@ async function handleDashboard(username: string): Promise<Response> {
     const html = `
         <!DOCTYPE html><html lang="my"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Shop</title>
         <style>${globalStyles}
-            /* --- Nav Links (Moved to Top) --- */
-            .nav-links { 
-                display: flex; 
-                justify-content: space-between; /* Pushes to corners */
-                margin-bottom: 20px;
-                margin-top: -10px; /* Pulls it up slightly */
-                gap: 10px; 
-            }
-            .nav-links a {
-                display: block;
-                padding: 10px 15px;
-                border-radius: 8px;
-                text-align: center;
-                font-weight: 600;
-                text-decoration: none;
-                /* flex: 1; <-- REMOVED */
-            }
-            /* UPDATED: Solid blue button */
-            .info-btn { 
-                background-color: #007bff; 
-                color: white; 
-                border: 1px solid #007bff;
-            }
-            /* UPDATED: Outline blue button */
-            .logout-btn { 
-                background-color: #ffffff; 
-                color: #007bff; 
-                border: 1px solid #007bff; 
-            }
-
-            /* --- Other Styles --- */
+            .nav-links { display: flex; justify-content: space-between; margin-bottom: 20px; margin-top: -10px; gap: 10px; }
+            .nav-links a { display: block; padding: 10px 15px; border-radius: 8px; text-align: center; font-weight: 600; text-decoration: none; }
+            .info-btn { background-color: #007bff; color: white; border: 1px solid #007bff; }
+            .logout-btn { background-color: #ffffff; color: #007bff; border: 1px solid #007bff; }
             .balance-box { background: linear-gradient(90deg, #007bff, #0056b3); color: white; padding: 20px; border-radius: 12px; margin-bottom: 25px; text-align: center; }
             .balance-label { font-size: 16px; opacity: 0.9; }
             .balance-amount { font-size: 2.5em; font-weight: 700; letter-spacing: 1px; }
@@ -344,12 +314,10 @@ async function handleDashboard(username: string): Promise<Response> {
         </style>
         </head>
         <body><div class="container" style="max-width: 800px;">
-            
             <div class="nav-links">
                 <a href="/user-info" class="info-btn">My Info</a>
                 <a href="/logout" class="logout-btn">Logout</a>
             </div>
-
             <div class="balance-box">
                 <div class="balance-label">Welcome, ${user.username}!</div>
                 <div class="balance-amount">${formatCurrency(user.balance)} Ks</div>
@@ -375,6 +343,9 @@ async function handleDashboard(username: string): Promise<Response> {
     return new Response(html, { headers: HTML_HEADERS });
 }
 
+// ----------------------------------------------------
+// (!!!!) USER INFO FUNCTION - UI UPDATED (!!!!)
+// ----------------------------------------------------
 async function handleUserInfoPage(username: string): Promise<Response> {
     const user = await getUserByUsername(username);
     if (!user) return handleLogout();
@@ -386,8 +357,9 @@ async function handleUserInfoPage(username: string): Promise<Response> {
         catch (e) { return utcString; }
     }
 
+    // UPDATED: Changed text "Received" to "Top Up"
     const topUpHistory = transactions.filter(t => t.type === 'topup')
-        .map(t => `<li class="topup"><span>Received <strong>${formatCurrency(t.amount)} Ks</strong></span><span class="time">${toMyanmarTime(t.timestamp)}</span></li>`).join('');
+        .map(t => `<li class="topup"><span><strong>Top Up</strong> <strong>${formatCurrency(t.amount)} Ks</strong></span><span class="time">${toMyanmarTime(t.timestamp)}</span></li>`).join('');
     
     const purchaseHistory = transactions.filter(t => t.type === 'purchase')
         .map(t => `<li class="purchase"><span>Bought <strong>${t.itemName || 'an item'}</strong> for <strong>${formatCurrency(Math.abs(t.amount))} Ks</strong></span><span class="time">${toMyanmarTime(t.timestamp)}</span></li>`)
