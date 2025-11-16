@@ -134,11 +134,14 @@ function getUsernameFromCookie(req: Request): string | null {
     }
 }
 
-function createSession(username: string): Headers {
+// UPDATED: createSession now handles "Remember Me"
+function createSession(username: string, remember: boolean): Headers {
     const headers = new Headers();
     const sessionId = username; 
+    // 30 days (2592000 sec) if remember=true, 1 hour (3600 sec) if false
+    const maxAge = remember ? 2592000 : 3600; 
     headers.set("Location", "/dashboard");
-    headers.set("Set-Cookie", `${SESSION_COOKIE_NAME}=${sessionId}; Path=/; Max-Age=3600; HttpOnly`);
+    headers.set("Set-Cookie", `${SESSION_COOKIE_NAME}=${sessionId}; Path=/; Max-Age=${maxAge}; HttpOnly`);
     return headers;
 }
 
@@ -151,7 +154,7 @@ const HTML_HEADERS = { "Content-Type": "text/html; charset=utf-8" };
 const globalStyles = `
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; margin: 0; padding: 20px; background-color: #f0f2f5; display: flex; justify-content: center; align-items: center; min-height: 90vh; }
     .container { max-width: 500px; width: 100%; padding: 30px; background-color: #ffffff; border-radius: 12px; box-shadow: 0 6px 16px rgba(0,0,0,0.1); }
-    h1 { color: #1c1e21; font-weight: 600; margin-bottom: 20px; } 
+    h1 { color: #1c1e21; font-weight: 600; margin-bottom: 20px; text-align: center; } 
     h2 { border-bottom: 1px solid #eee; padding-bottom: 5px; color: #333; }
     a { color: #007bff; text-decoration: none; }
     button { background-color: #007bff; color: white; border: none; padding: 12px 20px; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: 600; width: 100%; }
@@ -165,13 +168,16 @@ const globalStyles = `
         font-size: 16px; 
     }
     label { font-weight: 600; color: #555; }
+    .checkbox-container { display: flex; align-items: center; margin-top: 15px; }
+    .checkbox-container input { width: auto; margin-right: 10px; }
 `;
 
 function renderLoginForm(): Response {
     const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Login</title><style>${globalStyles}</style></head>
         <body><div class="container"><h1>User Login</h1><form action="/auth" method="POST">
         <label for="username">Name:</label><br><input type="text" id="username" name="username" required><br><br>
-        <label for="password">Password:</label><br><input type="password" id="password" name="password" required><br><br>
+        <label for="password">Password:</label><br><input type="password" id="password" name="password" required><br>
+        <div class="checkbox-container"><input type="checkbox" id="remember" name="remember"><label for="remember">Remember Me</label></div><br>
         <button type="submit">Log In</button></form>
         <p style="margin-top:20px; text-align:center;">Don't have an account? <a href="/register">Register Here</a></p></div></body></html>`;
     return new Response(html, { headers: HTML_HEADERS });
@@ -183,9 +189,11 @@ function renderRegisterForm(req: Request): Response {
     const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Register</title><style>${globalStyles} button.register{background-color:#28a745;}</style></head>
         <body><div class="container"><h1>Create Account</h1>
         ${error === 'exists' ? '<p class="error">This username is already taken.</p>' : ''}
-        <form action="/doregister" method="POST"><label for="username">Choose Name:</label><br><input type="text" id="username" name="username" required><br><br>
-        <label for="password">Choose Password:</label><br><input type="password" id="password" name="password" required><br><br>
-        <button type="submit" class="register">Create Account</button></form>
+        <form action="/doregister" method="POST">
+            <label for="username">Choose Name:</label><br><input type="text" id="username" name="username" required><br><br>
+            <label for="password">Choose Password:</label><br><input type="password" id="password" name="password" required><br>
+            <div class="checkbox-container"><input type="checkbox" id="remember" name="remember" checked><label for="remember">Remember Me</label></div><br>
+            <button type="submit" class="register">Create Account</button></form>
         <p style="margin-top:20px; text-align:center;">Already have an account? <a href="/login">Login</a></p></div></body></html>`;
     return new Response(html, { headers: HTML_HEADERS });
 }
@@ -195,7 +203,7 @@ async function renderAdminPanel(token: string, message: string | null): Promise<
     if (message === "topup_success") messageHtml = `<div class="success-msg">User balance updated!</div>`;
     if (message === "product_added") messageHtml = `<div class="success-msg">Product added!</div>`;
     if (message === "product_updated") messageHtml = `<div class="success-msg">Product updated!</div>`;
-    if (message === "product_deleted") messageHtml = `<div class="success-msg" style="background-color:#f8d7da; color:#721c24;">Product deleted!</div>`;
+    if (message === "product_deleted") messageHtml = `<div class"success-msg" style="background-color:#f8d7da; color:#721c24;">Product deleted!</div>`;
 
     const products = await getProducts();
     const productListHtml = products.map(p => `
@@ -219,7 +227,7 @@ async function renderAdminPanel(token: string, message: string | null): Promise<
             .edit-btn { background-color:#007bff; color:white; padding:5px 10px; border-radius:4px; font-size: 14px; }
             .delete-btn { background-color:#dc3545; padding:5px 10px; font-size: 14px; }
         </style></head>
-        <body><div class="container">
+        <body><div class="container" style="max-width: 700px;">
             ${messageHtml}
             <h2>Product Management</h2><div class="product-list">${products.length > 0 ? productListHtml : '<p>No products yet.</p>'}</div><hr>
             <h2>Add New Product</h2>
@@ -251,11 +259,10 @@ function renderMessagePage(title: string, message: string, isError = false, back
     const borderColor = isError ? "#dc3545" : "#28a745";
     const linkHref = backLink || "/dashboard";
     const linkText = backLink === null ? "Back to Shop" : "Go Back";
-    // Auto-redirect to dashboard after 3 seconds on success
-    const metaRefresh = isError ? '' : `<meta http-equiv="refresh" content="3;url=${linkHref}">`;
+    const metaRefresh = isError ? '' : `<meta http-equiv="refresh" content="3;url=${linkHref}">`; // 3 sec redirect
 
     const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${title}</title>${metaRefresh}<meta name="viewport" content="width=device-width, initial-scale=1"><style>${globalStyles} .container{text-align:center; border-top:5px solid ${borderColor};} .message{font-size:1.2em; color:${isError ? '#dc3545' : '#333'};}</style></head>
-        <body><div class="container"><h1>${title}</h1><p class="message">${message}</p><br><a href="${linkHref}">${linkText}</a></div></body></html>`;
+        <body><div class="container"><h1>${title}</h1><p class="message">${message}</p><br>${isError ? `<a href="${linkHref}">${linkText}</a>` : `<p style='color:#777; font-size:0.9em;'>Redirecting back automatically...</p>`}</div></body></html>`;
     
     return new Response(html, { status: isError ? 400 : 200, headers: HTML_HEADERS });
 }
@@ -281,9 +288,9 @@ async function handleDashboard(username: string): Promise<Response> {
     const html = `
         <!DOCTYPE html><html lang="my"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Shop</title>
         <style>${globalStyles}
-            .balance-box { background-color: #007bff; color: white; padding: 20px; border-radius: 12px; margin-bottom: 25px; text-align: center; }
-            .balance-label { font-size: 16px; opacity: 0.8; }
-            .balance-amount { font-size: 2.5em; font-weight: 700; }
+            .balance-box { background: linear-gradient(90deg, #007bff, #0056b3); color: white; padding: 20px; border-radius: 12px; margin-bottom: 25px; text-align: center; }
+            .balance-label { font-size: 16px; opacity: 0.9; }
+            .balance-amount { font-size: 2.5em; font-weight: 700; letter-spacing: 1px; }
             .product-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 15px; }
             .product-card { background: #fff; border: 1px solid #ddd; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); text-align: center; padding: 15px; }
             .product-image { width: 100%; height: 100px; object-fit: cover; border-radius: 8px; }
@@ -294,17 +301,16 @@ async function handleDashboard(username: string): Promise<Response> {
             .nav-links { display: flex; justify-content: space-between; margin-top: 25px; }
         </style>
         </head>
-        <body><div class="container">
-            <h1>Welcome, ${user.username}!</h1>
+        <body><div class="container" style="max-width: 800px;">
             <div class="balance-box">
-                <div class="balance-label">Current Balance:</div>
+                <div class="balance-label">Welcome, ${user.username}!</div>
                 <div class="balance-amount">${formatCurrency(user.balance)} Ks</div>
             </div>
             <h2>🛒 Shop Items:</h2>
             <div class="product-grid">
                 ${products.length > 0 ? productListHtml : '<p>No products available yet.</p>'}
             </div>
-            <div class="nav-links"><a href="/user-info">My Info</a><a href="/logout" style="color:red;">Logout</a></div>
+            <div class="nav-links"><a href="/user-info">My Info</a><a href="/logout" style="color:#dc3545;">Logout</a></div>
         </div>
         <script>
             function checkBalance(itemName, price, balance) {
@@ -335,28 +341,32 @@ async function handleUserInfoPage(username: string): Promise<Response> {
     }
 
     const topUpHistory = transactions.filter(t => t.type === 'topup')
-        .map(t => `<li>On ${toMyanmarTime(t.timestamp)}, you received <strong>${formatCurrency(t.amount)} Ks</strong>.</li>`).join('');
+        .map(t => `<li class="topup"><span>Received <strong>${formatCurrency(t.amount)} Ks</strong></span><span class="time">${toMyanmarTime(t.timestamp)}</span></li>`).join('');
     
     const purchaseHistory = transactions.filter(t => t.type === 'purchase')
-        .map(t => `<li>On ${toMyanmarTime(t.timestamp)}, you bought <strong>${t.itemName || 'an item'}</strong> for <strong>${formatCurrency(Math.abs(t.amount))} Ks</strong>.</li>`)
+        .map(t => `<li class="purchase"><span>Bought <strong>${t.itemName || 'an item'}</strong> for <strong>${formatCurrency(Math.abs(t.amount))} Ks</strong></span><span class="time">${toMyanmarTime(t.timestamp)}</span></li>`)
         .join('');
 
     const html = `
         <!DOCTYPE html><html lang="my"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>My Info</title>
         <style>${globalStyles}
-            .info-card { background: #f9f9f9; border-radius: 8px; padding: 15px; margin-bottom: 20px; }
-            .info-item { font-size: 1.1em; margin-bottom: 10px; display: flex; justify-content: space-between; }
-            .info-item strong { color: #333; }
-            .info-item span { color: #555; }
+            .header-card { background: linear-gradient(90deg, #007bff, #0056b3); color: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
+            .header-card h1 { color: white; margin: 0 0 10px 0; text-align: left; }
+            .header-card .info-item { font-size: 1.2em; opacity: 0.9; }
+            .balance { font-size: 2em; font-weight: 700; }
             .history { margin-top: 25px; }
             .history h2 { border-bottom: 1px solid #eee; padding-bottom: 5px; }
-            .history ul { padding-left: 20px; list-style-type: none; }
-            .history li { margin-bottom: 10px; padding: 8px; background: #fdfdfd; border: 1px solid #eee; border-radius: 5px; }
+            .history ul { padding-left: 0; list-style-type: none; }
+            .history li { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; padding: 12px; background: #fdfdfd; border: 1px solid #eee; border-radius: 8px; border-left-width: 5px; }
+            .history li.topup { border-left-color: #28a745; }
+            .history li.purchase { border-left-color: #ffc107; }
+            .history li .time { font-size: 0.9em; color: #777; }
         </style></head>
-        <body><div class="container"><h1>My User Info</h1>
-        <div class="info-card">
-            <div class="info-item"><strong>Username:</strong> <span>${user.username}</span></div>
-            <div class="info-item"><strong>Balance:</strong> <span style="color:#007bff; font-weight:bold;">${formatCurrency(user.balance)} Ks</span></div>
+        <body><div class="container">
+        <div class="header-card">
+            <h1>My User Info</h1>
+            <div class="info-item"><strong>Username:</strong> ${user.username}</div>
+            <div class="info-item"><strong>Balance:</strong> <span class="balance">${formatCurrency(user.balance)} Ks</span></div>
         </div>
         <p style="font-size:0.9em; color:gray; text-align: center;">(For security, passwords are never shown.)</p>
         <div class="history"><h2>Top-Up History</h2>${topUpHistory.length > 0 ? `<ul>${topUpHistory}</ul>` : '<p>You have not received any top-ups yet.</p>'}</div>
@@ -370,21 +380,25 @@ async function handleUserInfoPage(username: string): Promise<Response> {
 // Action Handlers (Processing POST requests)
 // ----------------------------------------------------
 
+// UPDATED: Now handles "Remember Me"
 async function handleAuth(formData: FormData): Promise<Response> {
     const username = formData.get("username")?.toString();
     const password = formData.get("password")?.toString();
+    const remember = formData.get("remember") === "on";
 
     if (!username || !password) return renderMessagePage("Login Failed", "Missing username or password.", true, "/login");
     const user = await getUserByUsername(username);
     if (!user || !verifyPassword(password, user.passwordHash)) return renderMessagePage("Login Failed", "Invalid username or password.", true, "/login");
     
-    const headers = createSession(username); 
+    const headers = createSession(username, remember); 
     return new Response("Login successful. Redirecting...", { status: 302, headers });
 }
 
+// UPDATED: Now handles "Remember Me"
 async function handleRegister(formData: FormData): Promise<Response> {
     const username = formData.get("username")?.toString();
     const password = formData.get("password")?.toString();
+    const remember = formData.get("remember") === "on";
 
     if (!username || !password) return new Response("Missing username or password.", { status: 400 });
 
@@ -392,7 +406,7 @@ async function handleRegister(formData: FormData): Promise<Response> {
     const success = await registerUser(username, passwordHash);
 
     if (success) {
-        const headers = createSession(username); 
+        const headers = createSession(username, remember); 
         return new Response("Account created. Logging in...", { status: 302, headers });
     } else {
         const headers = new Headers();
@@ -401,7 +415,6 @@ async function handleRegister(formData: FormData): Promise<Response> {
     }
 }
 
-// UPDATED: handleBuy now passes itemName to logTransaction
 async function handleBuy(formData: FormData, username: string): Promise<Response> {
     const item = formData.get("item")?.toString();
     const priceStr = formData.get("price")?.toString();
@@ -414,10 +427,10 @@ async function handleBuy(formData: FormData, username: string): Promise<Response
     const success = await updateUserBalance(username, -price); 
 
     if (success) {
-        await logTransaction(username, -price, "purchase", item); // Pass item name here
+        await logTransaction(username, -price, "purchase", item); 
         const newBalance = (await getUserByUsername(username))?.balance ?? 0;
         const message = `You bought <strong>${item}</strong> for ${formatCurrency(price)} Ks.<br>Your new balance is <strong>${formatCurrency(newBalance)} Ks</strong>.`;
-        return renderMessagePage("Purchase Successful!", message, false);
+        return renderMessagePage("Purchase Successful!", message, false); // Auto-redirects
     } else {
         const user = await getUserByUsername(username);
         const message = `You have ${formatCurrency(user?.balance ?? 0)} Ks but need ${formatCurrency(price)} Ks. Please contact admin for a top-up.`;
@@ -439,7 +452,7 @@ async function handleAdminTopUp(formData: FormData): Promise<Response> {
     const success = await updateUserBalance(username, amount);
 
     if (success) {
-        await logTransaction(username, amount, "topup"); // No item name
+        await logTransaction(username, amount, "topup"); 
         const headers = new Headers();
         headers.set("Location", `/admin/panel?token=${token}&message=topup_success`);
         return new Response("Redirecting...", { status: 302, headers });
