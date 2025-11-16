@@ -658,8 +658,9 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
             .profile-header { display: flex; align-items: center; margin-bottom: 20px; }
             .avatar { width: 60px; height: 60px; border-radius: 50%; background-color: #eee; margin-right: 15px; display: flex; justify-content: center; align-items: center; overflow: hidden; }
             .avatar svg { width: 32px; height: 32px; color: #aaa; }
-            .profile-info { flex-grow: 1; display: flex; align-items: baseline; gap: 10px; } 
-            .profile-name { font-size: 1.8em; font-weight: 600; color: #333; margin: 0; user-select: all; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+            /* FIXED: Alignment */
+            .profile-info { display: flex; align-items: baseline; gap: 10px; } 
+            .profile-name { font-size: 1.8em; font-weight: 600; color: #333; margin: 0; user-select: all; }
             .copy-btn-small { background: #007bff; color: white; border: none; padding: 5px 10px; font-size: 12px; border-radius: 5px; cursor: pointer; flex-shrink: 0; }
             
             /* Form Box */
