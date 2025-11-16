@@ -177,7 +177,7 @@ function renderAdminPanel(token: string, message: string | null): Response {
         messageHtml = `<div class="success-msg">User balance updated successfully!</div>`;
     }
     if (message === "product_added") {
-        messageHtml = `<div class"success-msg">Product added successfully!</div>`;
+        messageHtml = `<div class="success-msg">Product added successfully!</div>`;
     }
 
     const html = `
@@ -242,6 +242,7 @@ async function handleDashboard(username: string): Promise<Response> {
     const user = await getUserByUsername(username);
     if (!user) return handleLogout(); 
     
+    // Get all products from database
     const products = await getProducts();
     
     // Dynamically create product cards
@@ -393,7 +394,6 @@ async function handleAdminTopUp(formData: FormData): Promise<Response> {
 
     if (success) {
         await logTransaction(username, amount, "topup");
-        const updatedUser = await getUserByUsername(username);
         // Redirect back to admin panel with success message
         const headers = new Headers();
         headers.set("Location", `/admin/panel?token=${token}&message=topup_success`);
@@ -455,21 +455,6 @@ async function handler(req: Request): Promise<Response> {
         return renderAdminPanel(token, message); 
     }
     
-    if (req.method === "POST") {
-        const formData = await req.formData(); // Read body ONCE
-        const token = formData.get("token")?.toString();
-
-        if (token !== ADMIN_TOKEN) {
-             // Check if it's a user 'buy' action instead
-             const username = getUsernameFromCookie(req);
-             if (pathname === "/buy" && username) {
-                return handleBuy(req, username); // Re-pass 'req' as 'handleBuy' needs to re-read formData (oops)
-                // Let's fix this. handleBuy should also take formData.
-             }
-             // This logic is complex. Let's restart the router logic.
-        }
-    }
-
     // --- Protected Routes (Must be logged in) ---
     const username = getUsernameFromCookie(req);
 
@@ -488,19 +473,23 @@ async function handler(req: Request): Promise<Response> {
         return handleUserInfoPage(username);
     }
 
-    // --- Admin POST routes (must be checked AFTER user routes if token is inside formData)
-    if (pathname === "/admin/topup" && req.method === "POST") {
-        const formData = await req.formData();
+    // --- Admin POST routes (Checked after user routes)
+    // We check POST here to avoid reading formData() unless necessary
+    if (req.method === "POST") {
+        const formData = await req.formData(); // Read body ONCE
         const token = formData.get("token")?.toString();
-        if (token !== ADMIN_TOKEN) return renderMessagePage("Error", "Unauthorized: Invalid Token.", true);
-        return handleAdminTopUp(formData);
-    }
-    
-    if (pathname === "/admin/add_product" && req.method === "POST") {
-        const formData = await req.formData();
-        const token = formData.get("token")?.toString();
-        if (token !== ADMIN_TOKEN) return renderMessagePage("Error", "Unauthorized: Invalid Token.", true);
-        return handleAddProduct(formData);
+        
+        if (token !== ADMIN_TOKEN) {
+            return renderMessagePage("Error", "Unauthorized: Invalid Token.", true);
+        }
+
+        if (pathname === "/admin/topup") {
+            return handleAdminTopUp(formData);
+        }
+        
+        if (pathname === "/admin/add_product") {
+            return handleAddProduct(formData);
+        }
     }
 
     // --- Default Route ---
