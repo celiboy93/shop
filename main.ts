@@ -20,7 +20,6 @@ interface Transaction {
     itemName?: string; 
     itemDetails?: string; 
 }
-// NEW: For admin sales history
 interface DigitalSaleLog {
     username: string;
     itemName?: string;
