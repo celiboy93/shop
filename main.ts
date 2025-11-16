@@ -22,6 +22,7 @@ interface Product {
     id: string; 
     name: string; 
     price: number; 
+    salePrice?: number | null; // NEW: For Flash Sales
     imageUrl: string; 
 }
 interface Voucher {
@@ -30,7 +31,6 @@ interface Voucher {
     isUsed: boolean; 
     generatedAt: string;
 }
-// NEW: Data structure for Announcement
 interface Announcement {
     message: string;
 }
@@ -153,17 +153,17 @@ async function getProductById(id: string): Promise<Product | null> {
     return result.value;
 }
 
-async function addProduct(name: string, price: number, imageUrl: string): Promise<boolean> {
+async function addProduct(name: string, price: number, salePrice: number | null, imageUrl: string): Promise<boolean> {
     const id = Date.now().toString(); 
-    const product: Product = { id, name, price, imageUrl };
+    const product: Product = { id, name, price, salePrice, imageUrl };
     const key = ["products", id];
     const res = await kv.set(key, product);
     return res.ok;
 }
 
-async function updateProduct(id: string, name: string, price: number, imageUrl: string): Promise<boolean> {
+async function updateProduct(id: string, name: string, price: number, salePrice: number | null, imageUrl: string): Promise<boolean> {
     const key = ["products", id];
-    const product: Product = { id, name, price, imageUrl };
+    const product: Product = { id, name, price, salePrice, imageUrl };
     const res = await kv.set(key, product);
     return res.ok;
 }
@@ -200,7 +200,7 @@ async function getUnusedVouchers(): Promise<Voucher[]> {
     return vouchers.sort((a, b) => new Date(b.generatedAt).getTime() - new Date(a.generatedAt).getTime());
 }
 
-// --- NEW: Announcement KV Functions ---
+// --- Announcement KV Functions ---
 async function getAnnouncement(): Promise<string | null> {
     const key = ["site_announcement"];
     const result = await kv.get<Announcement>(key);
@@ -210,7 +210,7 @@ async function getAnnouncement(): Promise<string | null> {
 async function setAnnouncement(message: string): Promise<void> {
     const key = ["site_announcement"];
     if (message.trim() === "") {
-        await kv.delete(key); // Clear announcement if empty
+        await kv.delete(key); 
     } else {
         await kv.set(key, { message });
     }
@@ -245,7 +245,7 @@ function createSession(username: string, remember: boolean): Headers {
 }
 
 // ----------------------------------------------------
-// HTML Render Functions (Pages) - NEW UI
+// HTML Render Functions (Pages)
 // ----------------------------------------------------
 
 const HTML_HEADERS = { "Content-Type": "text/html; charset=utf-8" };
@@ -301,22 +301,16 @@ function renderRegisterForm(req: Request): Response {
     return new Response(html, { headers: HTML_HEADERS });
 }
 
-// UPDATED: Admin Panel now includes Announcement
+// UPDATED: Admin Panel now includes Flash Sale field
 async function renderAdminPanel(token: string, message: string | null): Promise<Response> {
     let messageHtml = "";
-    if (message === "topup_success") messageHtml = `<div class="success-msg">User balance updated!</div>`;
-    if (message === "product_added") messageHtml = `<div class="success-msg">Product added!</div>`;
-    if (message === "product_updated") messageHtml = `<div class="success-msg">Product updated!</div>`;
-    if (message === "product_deleted") messageHtml = `<div class"success-msg" style="background-color:#f8d7da; color:#721c24;">Product deleted!</div>`;
-    if (message === "pass_reset_success") messageHtml = `<div class="success-msg">User password reset successfully!</div>`;
-    if (message === "voucher_created") messageHtml = `<div class="success-msg">Voucher created successfully!</div>`;
-    if (message === "announcement_set") messageHtml = `<div class="success-msg">Announcement updated!</div>`;
+    if (message) messageHtml = `<div class="success-msg">${decodeURIComponent(message)}</div>`;
 
     const products = await getProducts();
     const productListHtml = products.map(p => `
         <div class="product-item">
-            <span>${p.name} (${formatCurrency(p.price)} Ks)</span>
-            <div class="actions">
+            <span>${p.name} (${formatCurrency(p.price)} Ks) ${p.salePrice ? `<strong style="color:red;">(Sale: ${formatCurrency(p.salePrice)} Ks)</strong>` : ''}</span>
+            <div class"actions">
                 <a href="/admin/edit_product?token=${token}&id=${p.id}" class="edit-btn">Edit</a>
                 <form method="POST" action="/admin/delete_product" style="display:inline;" onsubmit="return confirm('Delete ${p.name}?');">
                     <input type="hidden" name="token" value="${token}"><input type="hidden" name="productId" value="${p.id}"><button type="submit" class="delete-btn">Delete</button>
@@ -357,7 +351,13 @@ async function renderAdminPanel(token: string, message: string | null): Promise<
             
             <h2>Product Management</h2><div class="product-list">${products.length > 0 ? productListHtml : '<p>No products yet.</p>'}</div><hr>
             <h2>Add New Product</h2>
-            <form action="/admin/add_product" method="POST"><input type="hidden" name="token" value="${token}"><label>Product Name:</label><input type="text" name="name" required><br><br><label>Price (Ks):</label><input type="number" name="price" required><br><br><label>Image URL (or Emoji):</label><input type="url" name="imageUrl" required><br><br><button type="submit" class="product">Add Product</button></form><hr>
+            <form action="/admin/add_product" method="POST">
+                <input type="hidden" name="token" value="${token}">
+                <label>Product Name:</label><input type="text" name="name" required><br><br>
+                <label>Image URL (or Emoji):</label><input type="url" name="imageUrl" required><br><br>
+                <label>Full Price (Ks):</label><input type="number" name="price" required><br><br>
+                <label>Sale Price (Ks) (Optional):</label><input type="number" name="sale_price" placeholder="Leave empty for no sale"><br><br>
+                <button type="submit" class="product">Add Product</button></form><hr>
             <h2>User Top-Up</h2>
             <form action="/admin/topup" method="POST"><input type="hidden" name="token" value="${token}"><label>User Name:</label><input type="text" name="name" required><br><br><label>Amount (Ks):</label><input type="number" name="amount" required><br><br><button type="submit" class="admin">Add Balance</button></form><hr>
             <h2>Reset User Password</h2>
@@ -374,8 +374,9 @@ async function renderEditProductPage(token: string, product: Product): Promise<R
             <form action="/admin/update_product" method="POST">
                 <input type="hidden" name="token" value="${token}"><input type="hidden" name="productId" value="${product.id}">
                 <label>Product Name:</label><input type="text" name="name" required value="${product.name}"><br><br>
-                <label>Price (Ks):</label><input type="number" name="price" required value="${product.price}"><br><br>
                 <label>Image URL (or Emoji):</label><input type="url" name="imageUrl" required value="${product.imageUrl}"><br><br>
+                <label>Full Price (Ks):</label><input type="number" name="price" required value="${product.price}"><br><br>
+                <label>Sale Price (Ks) (Optional):</label><input type="number" name="sale_price" value="${product.salePrice || ''}" placeholder="Leave empty for no sale"><br><br>
                 <button type="submit" class="product">Update Product</button>
             </form><p style="text-align:center; margin-top:15px;"><a href="/admin/panel?token=${token}">Cancel</a></p>
         </div></body></html>`;
@@ -394,32 +395,43 @@ function renderMessagePage(title: string, message: string, isError = false, back
     return new Response(html, { status: isError ? 400 : 200, headers: HTML_HEADERS });
 }
 
-// UPDATED: Dashboard now includes Announcement Marquee
+// UPDATED: Dashboard now shows Sale Prices
 async function handleDashboard(username: string): Promise<Response> {
     const user = await getUserByUsername(username);
     if (!user) return handleLogout(); 
     
     const products = await getProducts();
-    const announcement = await getAnnouncement(); // Get announcement message
+    const announcement = await getAnnouncement(); 
     
-    // Create marquee HTML if message exists
     const announcementHtml = announcement ? `
         <div class="marquee-container">
             <div class="marquee-text">📢 ${announcement}</div>
         </div>
     ` : '';
 
-    const productListHtml = products.map(product => `
+    const productListHtml = products.map(product => {
+        // Determine the price to show and use
+        const hasSale = product.salePrice && product.salePrice > 0;
+        const displayPrice = hasSale ? product.salePrice : product.price;
+        
+        // Create the price HTML (show old price if on sale)
+        const priceHtml = hasSale
+            ? `<div class="product-price sale">
+                 <del>${formatCurrency(product.price)} Ks</del> <strong>${formatCurrency(displayPrice)} Ks</strong>
+               </div>`
+            : `<div class="product-price">${formatCurrency(product.price)} Ks</div>`;
+            
+        return `
         <div class="product-card">
             ${product.imageUrl.startsWith('http') ? `<img src="${product.imageUrl}" alt="${product.name}" class="product-image">` : `<div class="product-emoji">${product.imageUrl}</div>`}
             <h3 class="product-name">${product.name}</h3>
-            <div class="product-price">${formatCurrency(product.price)} Ks</div>
-            <form method="POST" action="/buy" onsubmit="return checkBalance('${product.name}', ${product.price}, ${user.balance});">
-                <input type="hidden" name="item" value="${product.name}"><input type="hidden" name="price" value="${product.price}">
+            ${priceHtml}
+            <form method="POST" action="/buy" onsubmit="return checkBalance('${product.name}', ${displayPrice}, ${user.balance});">
+                <input type="hidden" name="productId" value="${product.id}">
                 <button type="submit" class="buy-btn">Buy Now</button>
             </form>
         </div>
-    `).join('');
+    `}).join('');
     
     const html = `
         <!DOCTYPE html><html lang="my"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Shop</title>
@@ -437,8 +449,10 @@ async function handleDashboard(username: string): Promise<Response> {
             .product-emoji { font-size: 60px; line-height: 100px; height: 100px; }
             .product-name { font-size: 16px; font-weight: 600; color: #333; margin: 10px 0; }
             .product-price { font-size: 14px; font-weight: 600; color: #28a745; margin-bottom: 15px; }
+            .product-price.sale { color: #555; }
+            .product-price.sale del { color: #aaa; }
+            .product-price.sale strong { color: #dc3545; font-size: 1.1em; }
             .buy-btn { background-color: #28a745; width: 100%; padding: 10px; font-size: 14px; }
-            /* Marquee Style */
             .marquee-container { overflow: hidden; white-space: nowrap; background: #fffbe6; color: #856404; padding: 10px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #ffeeba; }
             .marquee-text { display: inline-block; padding-left: 100%; animation: marquee 15s linear infinite; }
             @keyframes marquee { 0% { transform: translateX(0); } 100% { transform: translateX(-100%); } }
@@ -449,8 +463,8 @@ async function handleDashboard(username: string): Promise<Response> {
                 <a href="/user-info" class="info-btn">My Info</a>
                 <a href="/logout" class="logout-btn">Logout</a>
             </div>
-            
-            ${announcementHtml} <div class="balance-box">
+            ${announcementHtml}
+            <div class="balance-box">
                 <div class="balance-label">Welcome, ${user.username}!</div>
                 <div class="balance-amount">${formatCurrency(user.balance)} Ks</div>
             </div>
@@ -475,7 +489,7 @@ async function handleDashboard(username: string): Promise<Response> {
     return new Response(html, { headers: HTML_HEADERS });
 }
 
-// UPDATED: User Info UI (Alignment, Scroll, Inline Redeem)
+// UPDATED: User Info UI (Alignment, Scroll, Inline Redeem, How to Top Up)
 async function handleUserInfoPage(req: Request, username: string): Promise<Response> {
     const user = await getUserByUsername(username);
     if (!user) return handleLogout();
@@ -489,16 +503,9 @@ async function handleUserInfoPage(req: Request, username: string): Promise<Respo
     const recipient = url.searchParams.get("recipient");
 
     let messageHtml = "";
-    if (message === "redeem_success") {
-        messageHtml = `<div class="success-msg">Success! ${formatCurrency(parseInt(value || "0"))} Ks was added to your balance.</div>`;
-    }
-    if (message === "transfer_success") {
-        messageHtml = `<div class="success-msg">Success! You sent ${formatCurrency(parseInt(value || "0"))} Ks to ${recipient}.</div>`;
-    }
-    if (error) {
-        messageHtml = `<div class="error" style="margin-top: 15px;">${decodeURIComponent(error)}</div>`;
-    }
-
+    if (message === "redeem_success") messageHtml = `<div class="success-msg">Success! ${formatCurrency(parseInt(value || "0"))} Ks was added to your balance.</div>`;
+    if (message === "transfer_success") messageHtml = `<div class"success-msg">Success! You sent ${formatCurrency(parseInt(value || "0"))} Ks to ${recipient}.</div>`;
+    if (error) messageHtml = `<div class="error" style="margin-top: 15px;">${decodeURIComponent(error)}</div>`;
 
     function toMyanmarTime(utcString: string): string {
         try { return new Date(utcString).toLocaleString("en-US", { timeZone: MYANMAR_TIMEZONE, hour12: true }); } 
@@ -515,12 +522,10 @@ async function handleUserInfoPage(req: Request, username: string): Promise<Respo
     const html = `
         <!DOCTYPE html><html lang="my"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>My Info</title>
         <style>${globalStyles}
-            /* Profile Header */
             .profile-header { display: flex; align-items: center; margin-bottom: 20px; }
             .avatar { width: 60px; height: 60px; border-radius: 50%; background-color: #eee; margin-right: 15px; display: flex; justify-content: center; align-items: center; overflow: hidden; }
             .avatar svg { width: 32px; height: 32px; color: #aaa; }
             .profile-info { flex-grow: 1; }
-            /* FIXED: Alignment */
             .profile-name { font-size: 1.8em; font-weight: 600; color: #333; margin: 0; }
             .profile-subtext { font-size: 1.1em; color: #555; }
             
@@ -532,30 +537,41 @@ async function handleUserInfoPage(req: Request, username: string): Promise<Respo
             
             .history { margin-top: 25px; }
             .history h2 { border-bottom: 1px solid #eee; padding-bottom: 5px; }
-            /* Scroll Box */
             .history-list { max-height: 250px; overflow-y: auto; background-color: #fcfcfc; border: 1px solid #eee; padding: 10px; border-radius: 8px; }
             .history ul { padding-left: 0; list-style-type: none; margin: 0; }
             .history li { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; padding: 12px; background: #fff; border: 1px solid #eee; border-radius: 8px; border-left-width: 5px; }
             .history li.topup { border-left-color: #28a745; }
             .history li.purchase { border-left-color: #ffc107; }
             .history li .time { font-size: 0.9em; color: #777; }
+            
+            .payment-info { background: #fffbe6; border: 1px solid #ffeeba; border-radius: 8px; padding: 15px; }
+            .payment-info li { list-style: none; margin-bottom: 10px; display: flex; align-items: center; }
+            .payment-info svg { width: 20px; height: 20px; margin-right: 10px; color: #007bff; }
         </style></head>
         <body><div class="container">
         
         <div class="profile-header">
             <div class="avatar">
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A1.875 1.875 0 0 1 18 22.5H6c-.98 0-1.813-.73-1.93-1.703a1.875 1.875 0 0 1 .03-1.179Z" />
-                </svg>
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A1.875 1.875 0 0 1 18 22.5H6c-.98 0-1.813-.73-1.93-1.703a1.875 1.875 0 0 1 .03-1.179Z" /></svg>
             </div>
             <div class="profile-info">
                 <h1 class="profile-name">${user.username}</h1>
                 <span class="profile-subtext">(Your Account Info)</span>
             </div>
         </div>
-        <p style="font-size:0.9em; color:gray; text-align: center;">(For security, passwords are never shown.)</p>
         
-        ${messageHtml} <div class="form-box">
+        ${messageHtml} <div class="form-box payment-info">
+            <h2>How to Top Up</h2>
+            <p>Please transfer to one of the accounts below and redeem the voucher code provided by admin.</p>
+            <ul style="padding-left: 0;">
+                <li><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M19.467 1.817a1.68 1.68 0 0 0-1.57-.002L3.58 6.471A1.68 1.68 0 0 0 2.21 7.91v1.314a1.68 1.68 0 0 0 .58 1.258l5.96 4.708a.75.75 0 0 1 .31.623v5.04a.75.75 0 0 0 1.25.59L12 19.333l3.22 2.451a.75.75 0 0 0 1.25-.59v-5.04a.75.75 0 0 1 .31-.623l5.96-4.708a1.68 1.68 0 0 0 .58-1.258V7.91a1.68 1.68 0 0 0-1.37-1.443L19.467 1.817Z" /></svg>
+                <strong>Telegram:</strong> <a href="https://t.me/iqowoq" target="_blank">@iqowoq</a></li>
+                <li><strong>KPay:</strong> 09961650283 (thein naing win)</li>
+                <li><strong>Wave Pay:</strong> 09688171999 (thein naing win)</li>
+            </ul>
+        </div>
+
+        <div class="form-box">
             <h2>Redeem Voucher</h2>
             <form action="/redeem_voucher" method="POST" style="display: flex; gap: 10px;">
                 <input type="text" id="code" name="code" required style="text-transform: uppercase; margin: 0; flex: 1;" placeholder="Enter code">
@@ -634,14 +650,22 @@ async function handleRegister(formData: FormData): Promise<Response> {
     }
 }
 
+// UPDATED: handleBuy now uses Product ID
 async function handleBuy(formData: FormData, username: string): Promise<Response> {
-    const item = formData.get("item")?.toString();
-    const priceStr = formData.get("price")?.toString();
-    const price = priceStr ? parseInt(priceStr) : NaN;
-
-    if (!item || isNaN(price) || price <= 0) {
-        return renderMessagePage("Error", "Invalid item or price.", true);
+    const productId = formData.get("productId")?.toString();
+    
+    if (!productId) {
+        return renderMessagePage("Error", "Invalid item ID.", true);
     }
+    
+    const product = await getProductById(productId);
+    if (!product) {
+        return renderMessagePage("Error", "Item not found.", true);
+    }
+
+    // Use server-side price (sale price if available)
+    const price = (product.salePrice && product.salePrice > 0) ? product.salePrice : product.price;
+    const item = product.name;
 
     const success = await updateUserBalance(username, -price); 
 
@@ -673,17 +697,20 @@ async function handleAdminTopUp(formData: FormData): Promise<Response> {
     if (success) {
         await logTransaction(username, amount, "topup", "Admin Top-Up"); 
         const headers = new Headers();
-        headers.set("Location", `/admin/panel?token=${token}&message=topup_success`);
+        headers.set("Location", `/admin/panel?token=${token}&message=${encodeURIComponent("User balance updated!")}`);
         return new Response("Redirecting...", { status: 302, headers });
     } else {
         return renderMessagePage("Error", `Failed to update balance for ${username}. User may not exist.`, true, adminBackLink);
     }
 }
 
+// UPDATED: handleAddProduct now saves salePrice
 async function handleAddProduct(formData: FormData): Promise<Response> {
     const name = formData.get("name")?.toString();
     const priceStr = formData.get("price")?.toString();
     const price = priceStr ? parseInt(priceStr) : NaN;
+    const salePriceStr = formData.get("sale_price")?.toString();
+    const salePrice = (salePriceStr && parseInt(salePriceStr) > 0) ? parseInt(salePriceStr) : null;
     const imageUrl = formData.get("imageUrl")?.toString();
     const token = formData.get("token")?.toString();
     const adminBackLink = `/admin/panel?token=${token}`;
@@ -692,18 +719,21 @@ async function handleAddProduct(formData: FormData): Promise<Response> {
         return renderMessagePage("Error", "Missing name, price, or image URL.", true, adminBackLink);
     }
     
-    await addProduct(name, price, imageUrl);
+    await addProduct(name, price, salePrice, imageUrl);
     
     const headers = new Headers();
-    headers.set("Location", `/admin/panel?token=${token}&message=product_added`);
+    headers.set("Location", `/admin/panel?token=${token}&message=${encodeURIComponent("Product added!")}`);
     return new Response("Redirecting...", { status: 302, headers });
 }
 
+// UPDATED: handleUpdateProduct now saves salePrice
 async function handleUpdateProduct(formData: FormData): Promise<Response> {
     const productId = formData.get("productId")?.toString();
     const name = formData.get("name")?.toString();
     const priceStr = formData.get("price")?.toString();
     const price = priceStr ? parseInt(priceStr) : NaN;
+    const salePriceStr = formData.get("sale_price")?.toString();
+    const salePrice = (salePriceStr && parseInt(salePriceStr) > 0) ? parseInt(salePriceStr) : null;
     const imageUrl = formData.get("imageUrl")?.toString();
     const token = formData.get("token")?.toString();
     const adminBackLink = `/admin/panel?token=${token}`;
@@ -712,10 +742,10 @@ async function handleUpdateProduct(formData: FormData): Promise<Response> {
         return renderMessagePage("Error", "Missing data for update.", true, adminBackLink);
     }
     
-    await updateProduct(productId, name, price, imageUrl);
+    await updateProduct(productId, name, price, salePrice, imageUrl);
     
     const headers = new Headers();
-    headers.set("Location", `/admin/panel?token=${token}&message=product_updated`);
+    headers.set("Location", `/admin/panel?token=${token}&message=${encodeURIComponent("Product updated!")}`);
     return new Response("Redirecting...", { status: 302, headers });
 }
 
@@ -731,7 +761,7 @@ async function handleDeleteProduct(formData: FormData): Promise<Response> {
     await deleteProduct(productId);
     
     const headers = new Headers();
-    headers.set("Location", `/admin/panel?token=${token}&message=product_deleted`);
+    headers.set("Location", `/admin/panel?token=${token}&message=${encodeURIComponent("Product deleted!")}`);
     return new Response("Redirecting...", { status: 302, headers });
 }
 
@@ -749,7 +779,7 @@ async function handleResetPassword(formData: FormData): Promise<Response> {
 
     if (success) {
         const headers = new Headers();
-        headers.set("Location", `/admin/panel?token=${token}&message=pass_reset_success`);
+        headers.set("Location", `/admin/panel?token=${token}&message=${encodeURIComponent("Password reset successfully!")}`);
         return new Response("Redirecting...", { status: 302, headers });
     } else {
         return renderMessagePage("Error", `Failed to reset password for ${username}. User may not exist.`, true, adminBackLink);
@@ -759,24 +789,23 @@ async function handleResetPassword(formData: FormData): Promise<Response> {
 async function handleRedeemVoucher(formData: FormData, username: string): Promise<Response> {
     const code = formData.get("code")?.toString().toUpperCase();
     const headers = new Headers();
-    // Redirect back to user-info page
     headers.set("Location", "/user-info"); 
 
     if (!code) {
-        headers.set("Location", "/user-info?error=invalid_code");
+        headers.set("Location", `/user-info?error=${encodeURIComponent("Invalid code.")}`);
         return new Response("Redirecting...", { status: 302, headers });
     }
 
     const result = await getVoucherByCode(code);
     if (!result || !result.value) {
-        headers.set("Location", "/user-info?error=invalid_code");
+        headers.set("Location", `/user-info?error=${encodeURIComponent("Voucher not valid.")}`);
         return new Response("Redirecting...", { status: 302, headers });
     }
     
     const voucher = result.value;
     
     if (voucher.isUsed) {
-        headers.set("Location", "/user-info?error=used_code");
+        headers.set("Location", `/user-info?error=${encodeURIComponent("Voucher already used.")}`);
         return new Response("Redirecting...", { status: 302, headers });
     }
     
@@ -803,7 +832,6 @@ async function handleTransfer(formData: FormData, username: string): Promise<Res
     const amount = amountStr ? parseInt(amountStr) : NaN;
     
     const headers = new Headers();
-    // Always redirect back to user-info
     headers.set("Location", "/user-info"); 
 
     if (!recipientName || isNaN(amount) || amount <= 0) {
@@ -835,11 +863,10 @@ async function handleCreateVoucher(formData: FormData): Promise<Response> {
     await generateVoucher(amount);
     
     const headers = new Headers();
-    headers.set("Location", `/admin/panel?token=${token}&message=voucher_created`);
+    headers.set("Location", `/admin/panel?token=${token}&message=${encodeURIComponent("Voucher created!")}`);
     return new Response("Redirecting...", { status: 302, headers });
 }
 
-// NEW: Handler for setting announcement
 async function handleSetAnnouncement(formData: FormData): Promise<Response> {
     const message = formData.get("message")?.toString() || "";
     const token = formData.get("token")?.toString();
@@ -847,7 +874,7 @@ async function handleSetAnnouncement(formData: FormData): Promise<Response> {
     await setAnnouncement(message);
     
     const headers = new Headers();
-    headers.set("Location", `/admin/panel?token=${token}&message=announcement_set`);
+    headers.set("Location", `/admin/panel?token=${token}&message=${encodeURIComponent("Announcement updated!")}`);
     return new Response("Redirecting...", { status: 302, headers });
 }
 
@@ -931,7 +958,7 @@ async function handler(req: Request): Promise<Response> {
         if (pathname === "/admin/delete_product") return await handleDeleteProduct(formData);
         if (pathname === "/admin/reset_password") return await handleResetPassword(formData); 
         if (pathname === "/admin/create_voucher") return await handleCreateVoucher(formData); 
-        if (pathname === "/admin/set_announcement") return await handleSetAnnouncement(formData); // FIXED BUG
+        if (pathname === "/admin/set_announcement") return await handleSetAnnouncement(formData); 
     }
 
     // --- Default Route (Redirect all other requests to login) ---
