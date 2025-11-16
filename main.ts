@@ -172,9 +172,23 @@ const globalStyles = `
     .checkbox-container input { width: auto; margin-right: 10px; }
 `;
 
-function renderLoginForm(): Response {
+// UPDATED: renderLoginForm now shows error messages on the same page
+function renderLoginForm(req: Request): Response {
+    const url = new URL(req.url);
+    const error = url.searchParams.get("error");
+    
+    let errorHtml = "";
+    if (error === 'invalid') {
+        errorHtml = '<p class="error">Invalid username or password. Please try again.</p>';
+    }
+    if (error === 'missing') {
+        errorHtml = '<p class="error">Please enter both username and password.</p>';
+    }
+
     const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Login</title><style>${globalStyles}</style></head>
-        <body><div class="container"><h1>User Login</h1><form action="/auth" method="POST">
+        <body><div class="container"><h1>User Login</h1>
+        ${errorHtml} 
+        <form action="/auth" method="POST">
         <label for="username">Name:</label><br><input type="text" id="username" name="username" required><br><br>
         <label for="password">Password:</label><br><input type="password" id="password" name="password" required><br>
         <div class="checkbox-container"><input type="checkbox" id="remember" name="remember"><label for="remember">Remember Me</label></div><br>
@@ -254,12 +268,11 @@ async function renderEditProductPage(token: string, product: Product): Promise<R
     return new Response(html, { headers: HTML_HEADERS });
 }
 
-// UPDATED: Added <meta refresh> for auto-redirect on non-errors
 function renderMessagePage(title: string, message: string, isError = false, backLink: string | null = null): Response {
     const borderColor = isError ? "#dc3545" : "#28a745";
     const linkHref = backLink || "/dashboard";
     const linkText = backLink === null ? "Back to Shop" : "Go Back";
-    const metaRefresh = isError ? '' : `<meta http-equiv="refresh" content="3;url=${linkHref}">`; // 3 sec redirect
+    const metaRefresh = isError ? '' : `<meta http-equiv="refresh" content="3;url=${linkHref}">`; 
 
     const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${title}</title>${metaRefresh}<meta name="viewport" content="width=device-width, initial-scale=1"><style>${globalStyles} .container{text-align:center; border-top:5px solid ${borderColor};} .message{font-size:1.2em; color:${isError ? '#dc3545' : '#333'};}</style></head>
         <body><div class="container"><h1>${title}</h1><p class="message">${message}</p><br>${isError ? `<a href="${linkHref}">${linkText}</a>` : `<p style='color:#777; font-size:0.9em;'>Redirecting back automatically...</p>`}</div></body></html>`;
@@ -328,7 +341,6 @@ async function handleDashboard(username: string): Promise<Response> {
     return new Response(html, { headers: HTML_HEADERS });
 }
 
-// UPDATED: New UI for User Info
 async function handleUserInfoPage(username: string): Promise<Response> {
     const user = await getUserByUsername(username);
     if (!user) return handleLogout();
@@ -380,21 +392,28 @@ async function handleUserInfoPage(username: string): Promise<Response> {
 // Action Handlers (Processing POST requests)
 // ----------------------------------------------------
 
-// UPDATED: Now handles "Remember Me"
+// UPDATED: Now redirects to login on fail
 async function handleAuth(formData: FormData): Promise<Response> {
     const username = formData.get("username")?.toString();
     const password = formData.get("password")?.toString();
     const remember = formData.get("remember") === "on";
 
-    if (!username || !password) return renderMessagePage("Login Failed", "Missing username or password.", true, "/login");
+    if (!username || !password) {
+        const headers = new Headers();
+        headers.set("Location", "/login?error=missing");
+        return new Response("Redirecting...", { status: 302, headers });
+    }
     const user = await getUserByUsername(username);
-    if (!user || !verifyPassword(password, user.passwordHash)) return renderMessagePage("Login Failed", "Invalid username or password.", true, "/login");
+    if (!user || !verifyPassword(password, user.passwordHash)) {
+        const headers = new Headers();
+        headers.set("Location", "/login?error=invalid");
+        return new Response("Redirecting...", { status: 302, headers });
+    }
     
     const headers = createSession(username, remember); 
     return new Response("Login successful. Redirecting...", { status: 302, headers });
 }
 
-// UPDATED: Now handles "Remember Me"
 async function handleRegister(formData: FormData): Promise<Response> {
     const username = formData.get("username")?.toString();
     const password = formData.get("password")?.toString();
@@ -534,8 +553,8 @@ async function handler(req: Request): Promise<Response> {
     
     // --- Handle GET requests ---
     if (req.method === "GET") {
-        if (pathname === "/login") return renderLoginForm();
-        if (pathname === "/register") return renderRegisterForm(req);
+        if (pathname === "/login") return renderLoginForm(req); // Pass req
+        if (pathname === "/register") return renderRegisterForm(req); // Pass req
         if (pathname === "/logout") return handleLogout();
 
         // Admin GET
@@ -556,10 +575,15 @@ async function handler(req: Request): Promise<Response> {
 
         // User GET (Protected)
         const username = getUsernameFromCookie(req);
-        if (!username) return handleLogout(); // If no cookie, redirect to login
-        
-        if (pathname === "/dashboard") return await handleDashboard(username);
-        if (pathname === "/user-info") return await handleUserInfoPage(username);
+        if (!username) {
+            // If not logged in and not asking for a public page, redirect to login
+            if(pathname === "/" || pathname === "/dashboard" || pathname === "/user-info") {
+                return handleLogout();
+            }
+        } else {
+             if (pathname === "/" || pathname === "/dashboard") return await handleDashboard(username);
+             if (pathname === "/user-info") return await handleUserInfoPage(username);
+        }
     }
     
     // --- Handle POST requests ---
