@@ -16,15 +16,26 @@ interface User {
 interface Transaction {
     type: "topup" | "purchase";
     amount: number;
-    timestamp: string; // Stored in UTC
-    itemName?: string; // Store the item name for purchases
+    timestamp: string; 
+    itemName?: string; 
+    itemDetails?: string; 
+}
+// NEW: For admin sales history
+interface DigitalSaleLog {
+    username: string;
+    itemName?: string;
+    itemDetails?: string;
+    timestamp: string;
+    amount: number;
 }
 interface Product {
     id: string; 
     name: string; 
     price: number; 
-    salePrice?: number | null; // NEW: For Flash Sales
+    salePrice?: number | null;
     imageUrl: string; 
+    isDigital: boolean; 
+    stock: string[]; 
 }
 interface Voucher {
     code: string; 
@@ -44,6 +55,11 @@ function formatCurrency(amount: number): string {
     return amount.toLocaleString('en-US');
 }
 
+function toMyanmarTime(utcString: string): string {
+    try { return new Date(utcString).toLocaleString("en-US", { timeZone: MYANMAR_TIMEZONE, hour12: true }); } 
+    catch (e) { return utcString; }
+}
+
 // ----------------------------------------------------
 // Core KV Functions (Data Management)
 // ----------------------------------------------------
@@ -55,7 +71,12 @@ async function getUserByUsername(username: string): Promise<User | null> {
 }
 
 async function registerUser(username: string, passwordHash: string): Promise<boolean> {
-    const user: User = { username, passwordHash, balance: 0 };
+    const user: User = { 
+        username, 
+        passwordHash, 
+        balance: 0, 
+        isBlocked: false 
+    };
     const key = ["users", username];
     const res = await kv.atomic().check({ key, versionstamp: null }).set(key, user).commit();
     return res.ok;
@@ -83,6 +104,21 @@ async function resetUserPassword(username: string, newPasswordHash: string): Pro
     const res = await kv.atomic().check(result).set(key, user).commit();
     return res.ok;
 }
+
+async function toggleBlockUser(username: string): Promise<string> {
+    const key = ["users", username];
+    const result = await kv.get<User>(key);
+    const user = result.value;
+    if (!user) return "User not found.";
+    const newStatus = !user.isBlocked;
+    user.isBlocked = newStatus;
+    const res = await kv.atomic().check(result).set(key, user).commit();
+    if (res.ok) {
+        return newStatus ? `User '${username}' has been BLOCKED.` : `User '${username}' has been UNBLOCKED.`;
+    }
+    return "Failed to update user status.";
+}
+
 
 async function transferBalance(senderUsername: string, recipientUsername: string, amount: number): Promise<string> {
     if (senderUsername === recipientUsername) return "Cannot send money to yourself.";
@@ -125,10 +161,10 @@ async function transferBalance(senderUsername: string, recipientUsername: string
 }
 
 
-async function logTransaction(username: string, amount: number, type: "topup" | "purchase", itemName?: string): Promise<void> {
+async function logTransaction(username: string, amount: number, type: "topup" | "purchase", itemName?: string, itemDetails?: string): Promise<void> {
     const timestamp = new Date().toISOString(); 
     const key = ["transactions", username, timestamp]; 
-    const transaction: Transaction = { type, amount, timestamp, itemName }; 
+    const transaction: Transaction = { type, amount, timestamp, itemName, itemDetails }; 
     await kv.set(key, transaction);
 }
 
@@ -140,6 +176,26 @@ async function getTransactions(username: string): Promise<Transaction[]> {
     }
     return transactions;
 }
+
+// NEW: Function to get all digital sales for Admin
+async function getDigitalSalesHistory(): Promise<DigitalSaleLog[]> {
+    const entries = kv.list<Transaction>({ prefix: ["transactions"] });
+    const logs: DigitalSaleLog[] = [];
+    for await (const entry of entries) {
+        const t = entry.value;
+        if (t.type === 'purchase' && t.itemDetails) {
+            logs.push({
+                username: entry.key[1] as string, // Get username from key
+                itemName: t.itemName,
+                itemDetails: t.itemDetails,
+                timestamp: t.timestamp,
+                amount: t.amount
+            });
+        }
+    }
+    return logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()); // Sort by most recent
+}
+
 
 // --- Product KV Functions ---
 async function getProducts(): Promise<Product[]> {
@@ -158,17 +214,17 @@ async function getProductById(id: string): Promise<{value: Product, versionstamp
     return result;
 }
 
-async function addProduct(name: string, price: number, salePrice: number | null, imageUrl: string): Promise<boolean> {
+async function addProduct(name: string, price: number, salePrice: number | null, imageUrl: string, isDigital: boolean, stock: string[]): Promise<boolean> {
     const id = Date.now().toString(); 
-    const product: Product = { id, name, price, salePrice, imageUrl };
+    const product: Product = { id, name, price, salePrice, imageUrl, isDigital, stock: stock || [] };
     const key = ["products", id];
     const res = await kv.set(key, product);
     return res.ok;
 }
 
-async function updateProduct(id: string, name: string, price: number, salePrice: number | null, imageUrl: string): Promise<boolean> {
+async function updateProduct(id: string, name: string, price: number, salePrice: number | null, imageUrl: string, isDigital: boolean, stock: string[]): Promise<boolean> {
     const key = ["products", id];
-    const product: Product = { id, name, price, salePrice, imageUrl };
+    const product: Product = { id, name, price, salePrice, imageUrl, isDigital, stock: stock || [] };
     const res = await kv.set(key, product);
     return res.ok;
 }
@@ -329,6 +385,7 @@ function renderRegisterForm(req: Request): Response {
     return new Response(html, { headers: HTML_HEADERS });
 }
 
+// UPDATED: Admin Panel now includes Digital Sales History
 async function renderAdminPanel(token: string, message: string | null): Promise<Response> {
     let messageHtml = "";
     if (message) messageHtml = `<div class="success-msg">${decodeURIComponent(message)}</div>`;
@@ -355,6 +412,16 @@ async function renderAdminPanel(token: string, message: string | null): Promise<
     `).join('');
     
     const currentAnnouncement = await getAnnouncement() || "";
+    
+    // NEW: Get Sales History
+    const salesHistory = await getDigitalSalesHistory();
+    const salesHistoryHtml = salesHistory.map(s => `
+        <div class="voucher-item">
+            <span><strong>${s.username}</strong> bought <strong>${s.itemName}</strong></span>
+            <span class="voucher-value">${toMyanmarTime(s.timestamp)}</span>
+        </div>
+    `).join('');
+
 
     const html = `
         <!DOCTYPE html><html lang="my"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Admin Panel</title>
@@ -375,7 +442,7 @@ async function renderAdminPanel(token: string, message: string | null): Promise<
 
             <h2>Generate Voucher Code</h2>
             <form action="/admin/create_voucher" method="POST"><input type="hidden" name="token" value="${token}"><label>Voucher Value (Ks):</label><input type="number" name="amount" required><br><br><button type="submit" class="voucher">Generate Code</button></form>
-            <div class="history-list"><h3>Unused Vouchers:</h3>${vouchers.length > 0 ? voucherListHtml : '<p>No unused vouchers.</p>'}</div><hr>
+            <div class="voucher-list"><h3>Unused Vouchers:</h3>${vouchers.length > 0 ? voucherListHtml : '<p>No unused vouchers.</p>'}</div><hr>
             
             <h2>Product Management</h2><div class="product-list">${products.length > 0 ? productListHtml : '<p>No products yet.</p>'}</div><hr>
             <h2>Add New Product</h2>
@@ -401,7 +468,12 @@ async function renderAdminPanel(token: string, message: string | null): Promise<
                 <button type="submit" class="admin">Adjust Balance</button>
             </form><br>
             <form action="/admin/reset_password" method="POST"><input type="hidden" name="token" value="${token}"><label>User Name (for Reset):</label><input type="text" name="name" required><br><br><label>New Password:</label><input type="text" name="new_password" required><br><br><button type="submit" class="reset">Reset Password</button></form><br>
-            <form action="/admin/toggle_block" method="POST"><input type="hidden" name="token" value="${token}"><label>User Name (to Block/Unblock):</label><input type="text" name="name" required><br><br><button type="submit" style="background-color:#555;">Toggle Block Status</button></form>
+            <form action="/admin/toggle_block" method="POST"><input type="hidden" name="token" value="${token}"><label>User Name (to Block/Unblock):</label><input type="text" name="name" required><br><br><button type="submit" style="background-color:#555;">Toggle Block Status</button></form><hr>
+
+            <h2>Digital Sales History</h2>
+            <div class="history-list">
+                ${salesHistoryHtml.length > 0 ? salesHistoryHtml : '<p>No digital items sold yet.</p>'}
+            </div>
         </div></body></html>`;
     return new Response(html, { headers: HTML_HEADERS });
 }
@@ -534,7 +606,7 @@ async function handleDashboard(user: User): Promise<Response> {
     return new Response(html, { headers: HTML_HEADERS });
 }
 
-// UPDATED: User Info UI (Copy Button, Alignment Fix)
+// UPDATED: User Info UI (Alignment, Scroll, Inline Redeem, How to Top Up, Purchased Codes)
 async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
     const transactions = await getTransactions(user.username);
     
@@ -565,6 +637,7 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
         .map(t => `<li class="purchase"><span>${t.itemName.includes('Transfer to') ? t.itemName : `Bought <strong>${t.itemName || 'an item'}</strong>`} for <strong>${formatCurrency(Math.abs(t.amount))} Ks</strong></span><span class="time">${toMyanmarTime(t.timestamp)}</span></li>`)
         .join('');
 
+    // List of purchased digital codes
     const digitalCodesHtml = digitalPurchases
         .map((t, index) => {
             const codeId = `code-${index}`;
@@ -589,18 +662,11 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
             .profile-header { display: flex; align-items: center; margin-bottom: 20px; }
             .avatar { width: 60px; height: 60px; border-radius: 50%; background-color: #eee; margin-right: 15px; display: flex; justify-content: center; align-items: center; overflow: hidden; }
             .avatar svg { width: 32px; height: 32px; color: #aaa; }
-            .profile-info { flex-grow: 1; }
-            .profile-name { font-size: 1.8em; font-weight: 600; color: #333; margin: 0; }
-            
             /* FIXED: Alignment */
-            .copy-btn-small { 
-                background: #e9ecef; color: #495057; border: 1px solid #ced4da;
-                padding: 4px 10px; font-size: 14px; font-weight: 500;
-                border-radius: 5px; cursor: pointer; width: auto; 
-                margin-top: 5px; /* This puts it below the name */
-            }
-            .copy-btn-small svg { width:14px; height:14px; vertical-align: text-bottom; margin-right: 5px; }
-
+            .profile-info { display: flex; align-items: center; gap: 10px; } 
+            .profile-name { font-size: 1.8em; font-weight: 600; color: #333; margin: 0; user-select: all; }
+            .copy-btn-small { background: #007bff; color: white; border: none; padding: 5px 10px; font-size: 12px; border-radius: 5px; cursor: pointer; }
+            
             .form-box { margin-bottom: 25px; background: #f9f9f9; padding: 20px; border-radius: 8px; }
             .form-box h2 { margin-top: 0; }
             .form-box input { width: 90%; }
@@ -636,13 +702,10 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A1.875 1.875 0 0 1 18 22.5H6c-.98 0-1.813-.73-1.93-1.703a1.875 1.875 0 0 1 .03-1.179Z" /></svg>
             </div>
             <div class="profile-info">
-                <h1 class="profile-name" id="username-text">${user.username}</h1>
-                <button class="copy-btn-small" onclick="copyToClipboard('username-text', this)">
-                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" style="width:14px; height:14px; vertical-align: text-bottom; margin-right: 5px;">
-                      <path stroke-linecap="round" stroke-linejoin="round" d="M15.666 3.888A2.25 2.25 0 0 0 13.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638m7.332 0c.055.194.084.4.084.612v0a2.25 2.25 0 0 1-2.25 2.25H13.5M15.666 3.888l-1.912.001M15.666 3.888c.31.097.585.25.828.457l1.912 1.912c.207.243.36.518.457.828l.001 1.912M15.666 3.888l1.912.001M13.5 2.25h-3c-1.03 0-1.9.693-2.166 1.638M13.5 2.25c.055.194.084.4.084.612v0a2.25 2.25 0 0 1-2.25 2.25H13.5M13.5 2.25l-1.912.001M13.5 2.25c.31.097.585.25.828.457l1.912 1.912c.207.243.36.518.457.828l.001 1.912M13.5 2.25l1.912.001m-1.912.001c-.31.097-.585.25-.828.457L13.5 6.25m-1.912.001L11.25 3.888m1.125 2.362a2.25 2.25 0 0 0-2.25 2.25v10.5a2.25 2.25 0 0 0 2.25 2.25h3a2.25 2.25 0 0 0 2.25-2.25V8.612a2.25 2.25 0 0 0-2.25-2.25h-3Zm-2.25 9.75h3" />
-                    </svg>
-                    Copy Username
-                </button>
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <h1 class="profile-name" id="username-text">${user.username}</h1>
+                    <button class="copy-btn-small" onclick="copyToClipboard('username-text', this)">Copy</button>
+                </div>
             </div>
         </div>
         
@@ -700,9 +763,8 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
             function copyToClipboard(elementId, buttonElement) {
                 const text = document.getElementById(elementId).innerText;
                 navigator.clipboard.writeText(text).then(() => {
-                    const originalText = buttonElement.innerHTML;
-                    buttonElement.innerHTML = "Copied!";
-                    setTimeout(() => { buttonElement.innerHTML = originalText; }, 2000);
+                    buttonElement.innerText = "Copied!";
+                    setTimeout(() => { buttonElement.innerText = "Copy"; }, 2000);
                 }, (err) => {
                     alert("Failed to copy.");
                 });
