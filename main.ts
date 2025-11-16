@@ -336,11 +336,14 @@ async function setGlobalBonus(amount: number): Promise<void> {
         const entries = kv.list<User>({ prefix: ["users"] });
         const mutations = [];
         for await (const entry of entries) {
-            entry.value.receivedBonus = false; 
-            mutations.push(kv.set(entry.key, entry.value));
+            if (entry.value.receivedBonus) { // Only reset if they already got it
+                 entry.value.receivedBonus = false; 
+                 mutations.push(kv.set(entry.key, entry.value));
+            }
         }
         await Promise.all(mutations);
     } else {
+        // Turn off the bonus
         await kv.set(key, { amount: 0, isActive: false });
     }
 }
@@ -507,7 +510,7 @@ async function renderAdminPanel(token: string, message: string | null): Promise<
         </style></head>
         <body><div class="container" style="max-width: 700px;">
             ${messageHtml}
-
+            
             <h2>Global Bonus Event</h2>
             <form action="/admin/set_global_bonus" method="POST">
                 <input type="hidden" name="token" value="${token}">
@@ -515,7 +518,7 @@ async function renderAdminPanel(token: string, message: string | null): Promise<
                 <input type="number" name="amount" value="${currentBonus?.isActive ? currentBonus.amount : '0'}" required><br><br>
                 <button type="submit" class="admin">Set Global Bonus</button>
             </form><hr>
-            
+
             <h2>Set Payment Info</h2>
             <form action="/admin/set_payment_info" method="POST">
                 <input type="hidden" name="token" value="${token}">
@@ -826,7 +829,7 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
             </div>
             <div class="profile-info">
                 <h1 class="profile-name" id="username-text">${user.username}</h1>
-                <button class="copy-btn-small" onclick="copyToClipboard('username-text', this)">Copy Username</button>
+                <button class="copy-btn-small" onclick="copyToClipboard('username-text', this, 'Copy Username')">Copy Username</button>
             </div>
         </div>
         
@@ -867,11 +870,10 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
         
         </div>
         <script>
-            function copyToClipboard(elementId, buttonElement) {
+            function copyToClipboard(elementId, buttonElement, originalText = 'Copy') {
                 const text = document.getElementById(elementId).innerText;
                 navigator.clipboard.writeText(text).then(() => {
                     buttonElement.innerText = "Copied!";
-                    const originalText = elementId === 'username-text' ? 'Copy Username' : 'Copy';
                     setTimeout(() => { buttonElement.innerText = originalText; }, 2000);
                 }, (err) => {
                     alert("Failed to copy.");
@@ -897,7 +899,11 @@ async function handleAuth(formData: FormData): Promise<Response> {
         headers.set("Location", "/login?error=missing");
         return new Response("Redirecting...", { status: 302, headers });
     }
-    const userResult = await kv.get<User>(["users", username]); // Fetch with versionstamp
+    
+    // 1. Get the user WITH versionstamp
+    const userKey = ["users", username];
+    const userResult = await kv.get<User>(userKey); // <--- This gets the versionstamp
+    
     if (!userResult.value) {
         const headers = new Headers();
         headers.set("Location", "/login?error=invalid");
@@ -906,35 +912,38 @@ async function handleAuth(formData: FormData): Promise<Response> {
     
     const user = userResult.value;
 
+    // 2. Check block / password
     if (user.isBlocked) {
         const headers = new Headers();
         headers.set("Location", "/login?error=blocked");
         return new Response("Redirecting...", { status: 302, headers });
     }
-    
     if (!verifyPassword(password, user.passwordHash)) {
         const headers = new Headers();
         headers.set("Location", "/login?error=invalid");
         return new Response("Redirecting...", { status: 302, headers });
     }
-    
-    // --- (FIXED) CHECK FOR GLOBAL BONUS ---
+
+    // 3. (FIXED) Check for Bonus
     const bonus = await getGlobalBonus();
     if (bonus && bonus.isActive && !user.receivedBonus) {
+        // User is eligible for a bonus.
         const newBalance = user.balance + bonus.amount;
         const updatedUser = { ...user, balance: newBalance, receivedBonus: true };
         
+        // 4. Do ONE atomic commit for the bonus
         const res = await kv.atomic()
-            .check(userResult) // Use the versionstamp from the initial get
-            .set(userResult.key, updatedUser)
+            .check(userResult) // Use the versionstamp we first fetched
+            .set(userKey, updatedUser)
             .commit();
-
+        
         if (res.ok) {
             await logTransaction(username, bonus.amount, "topup", "Event Bonus");
         }
+        // If it fails (race condition), they just log in normally and will get it next time.
     }
-    // --- END BONUS CHECK ---
     
+    // 5. Create session and redirect
     const headers = createSession(username, remember); 
     return new Response("Login successful. Redirecting...", { status: 302, headers });
 }
