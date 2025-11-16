@@ -18,6 +18,7 @@ interface Transaction {
     amount: number;
     timestamp: string; 
     itemName?: string; 
+    itemDetails?: string; 
 }
 interface Product {
     id: string; 
@@ -251,23 +252,27 @@ function verifyPassword(inputPassword: string, storedHash: string): boolean {
     return inputPassword === storedHash;
 }
 
+// UPDATED: Now decodes the username from the cookie
 function getUsernameFromCookie(req: Request): string | null {
     const cookieHeader = req.headers.get("Cookie");
     if (!cookieHeader || !cookieHeader.includes(SESSION_COOKIE_NAME)) return null;
     try {
         const match = cookieHeader.match(new RegExp(`${SESSION_COOKIE_NAME}=([^;]+)`));
-        return match ? match[1].split(';')[0] : null;
-    } catch {
+        // Decode the cookie value in case it contains UTF-8 characters
+        return match ? decodeURIComponent(match[1].split(';')[0]) : null;
+    } catch (e) {
+        console.error("Cookie decode error:", e);
         return null;
     }
 }
 
+// UPDATED: Now URI-encodes the username before setting the cookie
 function createSession(username: string, remember: boolean): Headers {
     const headers = new Headers();
-    const sessionId = username; 
+    const encodedSessionId = encodeURIComponent(username); // Encode for UTF-8 safety
     const maxAge = remember ? 2592000 : 3600; // 30 days or 1 hour
     headers.set("Location", "/dashboard");
-    headers.set("Set-Cookie", `${SESSION_COOKIE_NAME}=${sessionId}; Path=/; Max-Age=${maxAge}; HttpOnly`);
+    headers.set("Set-Cookie", `${SESSION_COOKIE_NAME}=${encodedSessionId}; Path=/; Max-Age=${maxAge}; HttpOnly; SameSite=Lax`);
     return headers;
 }
 
@@ -294,6 +299,7 @@ const globalStyles = `
     .checkbox-container input { width: auto; margin-right: 10px; }
 `;
 
+// UPDATED: Added Login Icon
 function renderLoginForm(req: Request): Response {
     const url = new URL(req.url);
     const error = url.searchParams.get("error");
@@ -303,8 +309,18 @@ function renderLoginForm(req: Request): Response {
     if (error === 'missing') errorHtml = '<p class="error">Please enter both username and password.</p>';
     if (error === 'blocked') errorHtml = '<p class="error">Your account has been suspended by the admin.</p>';
 
-    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Login</title><style>${globalStyles}</style></head>
-        <body><div class="container"><h1>User Login</h1>${errorHtml} 
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Login</title>
+        <style>${globalStyles}
+            .login-icon { text-align: center; margin-bottom: 15px; }
+            .login-icon svg { width: 50px; height: 50px; color: #007bff; }
+        </style></head>
+        <body><div class="container">
+        <div class="login-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 21v-7.5a.75.75 0 0 1 .75-.75h3a.75.75 0 0 1 .75.75V21m-4.5 0H2.36m11.14 0H18m0 0h2.64m-2.64 0l1.1-1.291c.414-.414.414-1.083 0-1.497l-1.1-1.291M18 21v-3.328c0-.68.27-1.306.73-1.767l1.1-1.291M18 21v-7.5a.75.75 0 0 0-.75-.75h-3a.75.75 0 0 0-.75.75V21m-4.5 0H2.36m11.14 0H18m0 0h2.64m-2.64 0l1.1-1.291c.414-.414.414-1.083 0-1.497l-1.1-1.291M18 21v-3.328c0-.68.27-1.306.73-1.767l1.1-1.291m0 0l-1.1 1.291m1.1-1.291L19.1 16.24c.414-.414.414-1.083 0-1.497l-1.1-1.291M2.36 21c.62 0 1.18-.034 1.71-.1H2.36m13.32 0a1.14 1.14 0 0 0 1.71-.1h-1.71M2.36 21c.62 0 1.18-.034 1.71-.1H2.36m13.32 0a1.14 1.14 0 0 0 1.71-.1h-1.71M2.36 21c.62 0 1.18-.034 1.71-.1H2.36m9.84-9.924c.414-.414.414-1.083 0-1.497l-1.1-1.291c-.414-.414-1.083-.414-1.497 0l-1.1 1.291c-.414.414-.414 1.083 0 1.497l1.1 1.291c.414.414 1.083.414 1.497 0l1.1-1.291M4.07 20.9c.62.066 1.18.1 1.71.1H4.07m9.84-9.924c.414-.414.414-1.083 0-1.497l-1.1-1.291c-.414-.414-1.083-.414-1.497 0l-1.1 1.291c-.414.414-.414 1.083 0 1.497l1.1 1.291c.414.414 1.083.414 1.497 0l1.1-1.291M4.07 20.9c.62.066 1.18.1 1.71.1H4.07m9.84-9.924c.414-.414.414-1.083 0-1.497l-1.1-1.291c-.414-.414-1.083-.414-1.497 0l-1.1 1.291c-.414.414-.414 1.083 0 1.497l1.1 1.291c.414.414 1.083.414 1.497 0l1.1-1.291M4.07 20.9c.62.066 1.18.1 1.71.1H4.07M4.07 20.9v-3.328c0-.68.27-1.306.73-1.767l1.1-1.291c.414-.414.414-1.083 0-1.497l-1.1-1.291c-.414-.414-1.083-.414-1.497 0l-1.1 1.291c-.414.414-.414 1.083 0 1.497l1.1 1.291c.414.414 1.083.414 1.497 0l1.1-1.291M4.07 20.9v-3.328c0-.68.27-1.306.73-1.767l1.1-1.291c.414-.414.414-1.083 0-1.497l-1.1-1.291c-.414-.414-1.083-.414-1.497 0l-1.1 1.291c-.414.414-.414 1.083 0 1.497l1.1 1.291c.414.414 1.083.414 1.497 0l1.1-1.291m0 0l-1.1 1.291m1.1-1.291L5.17 16.24c.414-.414.414-1.083 0-1.497l-1.1-1.291m0 0L2.97 12.16c-.414-.414-.414-1.083 0-1.497l1.1-1.291m0 0L2.97 7.875c-.414-.414-.414-1.083 0-1.497L4.07 5.09c.414-.414 1.083-.414 1.497 0l1.1 1.291c.414.414.414 1.083 0 1.497L5.567 9.17c-.414.414-1.083.414-1.497 0L2.97 7.875m1.1 1.291L5.17 7.875m0 0L4.07 6.583c-.414-.414-1.083-.414-1.497 0L1.473 7.875c-.414.414-.414 1.083 0 1.497l1.1 1.291c.414.414 1.083.414 1.497 0l1.1-1.291" />
+            </svg>
+        </div>
+        <h1>User Login</h1>${errorHtml} 
         <form action="/auth" method="POST">
         <label for="username">Name:</label><br><input type="text" id="username" name="username" required><br><br>
         <label for="password">Password:</label><br><input type="password" id="password" name="password" required><br>
@@ -314,11 +330,23 @@ function renderLoginForm(req: Request): Response {
     return new Response(html, { headers: HTML_HEADERS });
 }
 
+// UPDATED: Added Login Icon
 function renderRegisterForm(req: Request): Response {
     const url = new URL(req.url);
     const error = url.searchParams.get("error");
-    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Register</title><style>${globalStyles} button.register{background-color:#28a745;}</style></head>
-        <body><div class="container"><h1>Create Account</h1>
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Register</title>
+        <style>${globalStyles} 
+            button.register{background-color:#28a745;}
+            .login-icon { text-align: center; margin-bottom: 15px; }
+            .login-icon svg { width: 50px; height: 50px; color: #28a745; }
+        </style></head>
+        <body><div class="container">
+        <div class="login-icon">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M18 7.5v3m0 0v3m0-3h3m-3 0h-3m-2.25-4.125a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0ZM3 19.235v-.11a6.375 6.375 0 0 1 12.75 0v.109A12.318 12.318 0 0 1 9.374 21c-2.331 0-4.512-.645-6.374-1.766Z" />
+            </svg>
+        </div>
+        <h1>Create Account</h1>
         ${error === 'exists' ? '<p class="error">This username is already taken.</p>' : ''}
         <form action="/doregister" method="POST">
             <label for="username">Choose Name:</label><br><input type="text" id="username" name="username" required><br><br>
@@ -329,7 +357,6 @@ function renderRegisterForm(req: Request): Response {
     return new Response(html, { headers: HTML_HEADERS });
 }
 
-// UPDATED: Admin Panel now includes "Adjust Balance"
 async function renderAdminPanel(token: string, message: string | null): Promise<Response> {
     let messageHtml = "";
     if (message) messageHtml = `<div class="success-msg">${decodeURIComponent(message)}</div>`;
@@ -534,9 +561,7 @@ async function handleDashboard(user: User): Promise<Response> {
     return new Response(html, { headers: HTML_HEADERS });
 }
 
-// ----------------------------------------------------
-// (!!!!) USER INFO FUNCTION - UI UPDATED (!!!!)
-// ----------------------------------------------------
+// UPDATED: User Info UI (Alignment, Scroll, Inline Redeem, How to Top Up, Purchased Codes)
 async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
     const transactions = await getTransactions(user.username);
     
@@ -567,7 +592,7 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
         .map(t => `<li class="purchase"><span>${t.itemName.includes('Transfer to') ? t.itemName : `Bought <strong>${t.itemName || 'an item'}</strong>`} for <strong>${formatCurrency(Math.abs(t.amount))} Ks</strong></span><span class="time">${toMyanmarTime(t.timestamp)}</span></li>`)
         .join('');
 
-    // NEW: List of purchased digital codes
+    // List of purchased digital codes
     const digitalCodesHtml = digitalPurchases
         .map((t, index) => {
             const codeId = `code-${index}`;
@@ -589,14 +614,12 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
     const html = `
         <!DOCTYPE html><html lang="my"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>My Info</title>
         <style>${globalStyles}
-            /* Profile Header */
             .profile-header { display: flex; align-items: center; margin-bottom: 20px; }
             .avatar { width: 60px; height: 60px; border-radius: 50%; background-color: #eee; margin-right: 15px; display: flex; justify-content: center; align-items: center; overflow: hidden; }
             .avatar svg { width: 32px; height: 32px; color: #aaa; }
             .profile-info { flex-grow: 1; }
             .profile-name { font-size: 1.8em; font-weight: 600; color: #333; margin: 0; }
             
-            /* Form Box */
             .form-box { margin-bottom: 25px; background: #f9f9f9; padding: 20px; border-radius: 8px; }
             .form-box h2 { margin-top: 0; }
             .form-box input { width: 90%; }
@@ -605,7 +628,6 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
             
             .history { margin-top: 25px; }
             .history h2 { border-bottom: 1px solid #eee; padding-bottom: 5px; }
-            /* Scroll Box */
             .history-list { max-height: 250px; overflow-y: auto; background-color: #fcfcfc; border: 1px solid #eee; padding: 10px; border-radius: 8px; }
             .history ul { padding-left: 0; list-style-type: none; margin: 0; }
             .history li { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; padding: 12px; background: #fff; border: 1px solid #eee; border-radius: 8px; border-left-width: 5px; }
@@ -615,11 +637,9 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
             .voucher-code { font-size: 1.1em; color: #d63384; user-select: all; }
             .copy-btn { background-color: #007bff; color: white; border: none; padding: 5px 10px; border-radius: 5px; font-size: 12px; cursor: pointer; }
 
-            /* Payment Info Box */
             .payment-info { background: #fffbe6; border: 1px solid #ffeeba; border-radius: 8px; padding: 20px; }
             .payment-info h2 { margin-top: 0; }
             .payment-list { padding-left: 0; list-style: none; margin-top: 15px; }
-            /* FIXED: Alignment for Payment */
             .payment-account { display: grid; grid-template-columns: 100px auto; align-items: center; margin-bottom: 12px; font-size: 1.1em; }
             .payment-account strong { font-weight: 600; color: #333; }
             .payment-account .details { display: flex; flex-direction: column; }
