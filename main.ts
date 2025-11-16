@@ -4,6 +4,8 @@ const kv = await Deno.openKv();
 // --- Configuration and Security ---
 const ADMIN_TOKEN = Deno.env.get("ADMIN_TOKEN") || "hardcoded_admin_pass"; 
 const SESSION_COOKIE_NAME = "session_id";
+// NEW: Define Myanmar Timezone
+const MYANMAR_TIMEZONE = "Asia/Yangon";
 
 // --- Data Structures ---
 interface User {
@@ -11,11 +13,10 @@ interface User {
     passwordHash: string;
     balance: number;
 }
-// NEW: Structure for logging transactions
 interface Transaction {
     type: "topup" | "purchase";
     amount: number;
-    timestamp: string;
+    timestamp: string; // Stored in UTC
 }
 
 // ----------------------------------------------------
@@ -31,12 +32,7 @@ async function getUserByUsername(username: string): Promise<User | null> {
 async function registerUser(username: string, passwordHash: string): Promise<boolean> {
     const user: User = { username, passwordHash, balance: 0 };
     const key = ["users", username];
-
-    const res = await kv.atomic()
-        .check({ key, versionstamp: null }) 
-        .set(key, user)
-        .commit();
-
+    const res = await kv.atomic().check({ key, versionstamp: null }).set(key, user).commit();
     return res.ok;
 }
 
@@ -50,21 +46,17 @@ async function updateUserBalance(username: string, amountChange: number): Promis
         const newBalance = user.balance + amountChange;
         if (newBalance < 0) return false; 
         const res = await kv.atomic().check(result).set(key, { ...user, balance: newBalance }).commit();
-        if (res.ok) {
-            return true; 
-        }
+        if (res.ok) return true; 
     }
 }
 
-// NEW: Function to log transactions for history
 async function logTransaction(username: string, amount: number, type: "topup" | "purchase"): Promise<void> {
-    const timestamp = new Date().toISOString();
-    const key = ["transactions", username, timestamp]; // e.g., ["transactions", "ko_aung", "2025-11-16T..."]
+    const timestamp = new Date().toISOString(); // Always store in UTC
+    const key = ["transactions", username, timestamp]; 
     const transaction: Transaction = { type, amount, timestamp };
     await kv.set(key, transaction);
 }
 
-// NEW: Function to get all transactions for a user
 async function getTransactions(username: string): Promise<Transaction[]> {
     const entries = kv.list<Transaction>({ prefix: ["transactions", username] }, { reverse: true });
     const transactions: Transaction[] = [];
@@ -93,7 +85,6 @@ function getUsernameFromCookie(req: Request): string | null {
     }
 }
 
-// NEW: Function to create a session (used by Login AND Register)
 function createSession(username: string): Headers {
     const headers = new Headers();
     const sessionId = username; 
@@ -145,27 +136,60 @@ async function handleDashboard(username: string): Promise<Response> {
         <body><div class="container"><h1>Welcome, ${user.username}!</h1>
         <div class="balance-box"><span>Current Balance:</span><div class="balance-amount">${user.balance} Ks</div></div>
         <h2>🛒 Shop Items:</h2>
-        <div class="item-card"><div class="item-info"><h3>☕ Coffee <span class="price">(${coffeePrice} Ks)</span></h3></div><form action="/buy" method="POST"><input type="hidden" name="item" value="Coffee"><input type="hidden" name="price" value="${coffeePrice}"><button type="submit" class="buy-btn ${user.balance < coffeePrice ? 'disabled' : ''}" ${user.balance < coffeePrice ? 'disabled' : ''}>${user.balance < coffeePrice ? 'Insufficient Balance' : 'Buy Now'}</button></form></div>
-        <div class="item-card"><div class="item-info"><h3>🍵 Tea <span class="price">(${teaPrice} Ks)</span></h3></div><form action="/buy" method="POST"><input type="hidden" name="item" value="Tea"><input type="hidden" name="price" value="${teaPrice}"><button type="submit" class="buy-btn ${user.balance < teaPrice ? 'disabled' : ''}" ${user.balance < teaPrice ? 'disabled' : ''}>${user.balance < teaPrice ? 'Insufficient Balance' : 'Buy Now'}</button></form></div>
+        
+        <div class="item-card">
+            <div class="item-info"><h3>☕ Coffee <span class="price">(${coffeePrice} Ks)</span></h3></div>
+            <form action="/buy" method="POST" onsubmit="return confirm('Are you sure you want to buy Coffee for ${coffeePrice} Ks?');">
+                <input type="hidden" name="item" value="Coffee"><input type="hidden" name="price" value="${coffeePrice}">
+                <button type="submit" class="buy-btn ${user.balance < coffeePrice ? 'disabled' : ''}" ${user.balance < coffeePrice ? 'disabled' : ''}>
+                    ${user.balance < coffeePrice ? 'Insufficient Balance' : 'Buy Now'}
+                </button>
+            </form>
+        </div>
+        
+        <div class="item-card">
+            <div class="item-info"><h3>🍵 Tea <span class="price">(${teaPrice} Ks)</span></h3></div>
+            <form action="/buy" method="POST" onsubmit="return confirm('Are you sure you want to buy Tea for ${teaPrice} Ks?');">
+                <input type="hidden" name="item" value="Tea"><input type="hidden" name="price" value="${teaPrice}">
+                <button type="submit" class="buy-btn ${user.balance < teaPrice ? 'disabled' : ''}" ${user.balance < teaPrice ? 'disabled' : ''}>
+                    ${user.balance < teaPrice ? 'Insufficient Balance' : 'Buy Now'}
+                </button>
+            </form>
+        </div>
+        
         <div class="nav-links"><a href="/user-info">My Info</a><a href="/logout" style="color:red;">Logout</a></div></div></body></html>`;
     return new Response(html, { headers: { "Content-Type": "text/html" } });
 }
 
-// ROUTE: /user-info (NEW PAGE)
+// ROUTE: /user-info (UPDATED with Timezone)
 async function handleUserInfoPage(username: string): Promise<Response> {
     const user = await getUserByUsername(username);
     if (!user) return handleLogout();
 
     const transactions = await getTransactions(username);
     
+    // Function to convert UTC string to Myanmar Time string
+    function toMyanmarTime(utcString: string): string {
+        return new Date(utcString).toLocaleString("en-US", {
+            timeZone: MYANMAR_TIMEZONE, // "Asia/Yangon"
+            year: 'numeric', month: 'numeric', day: 'numeric',
+            hour: 'numeric', minute: 'numeric', hour12: true
+        });
+    }
+
     // Generate HTML for transaction history
     const topUpHistory = transactions
         .filter(t => t.type === 'topup')
-        .map(t => `<li>On ${new Date(t.timestamp).toLocaleString()}, you received <strong>${t.amount} Ks</strong>.</li>`)
+        .map(t => `<li>On ${toMyanmarTime(t.timestamp)}, you received <strong>${t.amount} Ks</strong>.</li>`)
+        .join('');
+        
+    const purchaseHistory = transactions
+        .filter(t => t.type === 'purchase')
+        .map(t => `<li>On ${toMyanmarTime(t.timestamp)}, you bought an item for <strong>${Math.abs(t.amount)} Ks</strong>.</li>`)
         .join('');
 
     const html = `
-        <!DOCTYPE html><html lang="my"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>My Info</title><style>body{font-family:sans-serif; margin:20px; background-color:#f4f7f6;} .container{max-width:600px; margin:auto; padding:20px; background-color:white; border-radius:8px; box-shadow:0 4px 6px rgba(0,0,0,0.1);} h1{color:#333;} .info-item{font-size:1.2em; margin-bottom:10px;} .history{margin-top:20px;}</style></head>
+        <!DOCTYPE html><html lang="my"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>My Info</title><style>body{font-family:sans-serif; margin:20px; background-color:#f4f7f6;} .container{max-width:600px; margin:auto; padding:20px; background-color:white; border-radius:8px; box-shadow:0 4px 6px rgba(0,0,0,0.1);} h1{color:#333;} .info-item{font-size:1.2em; margin-bottom:10px;} .history{margin-top:20px;} ul{padding-left: 20px;}</style></head>
         <body><div class="container">
             <h1>My User Info</h1>
             <div class="info-item"><strong>Username:</strong> ${user.username}</div>
@@ -175,6 +199,11 @@ async function handleUserInfoPage(username: string): Promise<Response> {
             <div class="history">
                 <h2>Top-Up History</h2>
                 ${topUpHistory.length > 0 ? `<ul>${topUpHistory}</ul>` : '<p>You have not received any top-ups yet.</p>'}
+            </div>
+            
+            <div class="history">
+                <h2>Purchase History</h2>
+                ${purchaseHistory.length > 0 ? `<ul>${purchaseHistory}</ul>` : '<p>You have not made any purchases yet.</p>'}
             </div>
             
             <a href="/dashboard">Back to Shop</a>
@@ -196,11 +225,10 @@ async function handleAuth(req: Request): Promise<Response> {
     const user = await getUserByUsername(username);
     if (!user || !verifyPassword(password, user.passwordHash)) return new Response("Invalid username or password.", { status: 401 });
 
-    const headers = createSession(username); // Use the new session function
+    const headers = createSession(username); 
     return new Response("Login successful. Redirecting...", { status: 302, headers });
 }
 
-// UPDATED: handleRegister now logs the user in
 async function handleRegister(req: Request): Promise<Response> {
     const formData = await req.formData();
     const username = formData.get("username")?.toString();
@@ -208,41 +236,50 @@ async function handleRegister(req: Request): Promise<Response> {
 
     if (!username || !password) return new Response("Missing username or password.", { status: 400 });
 
-    const passwordHash = password; // NOTE: Hash password here in a real app
+    const passwordHash = password; 
     const success = await registerUser(username, passwordHash);
 
     if (success) {
-        // AUTO-LOGIN: Create session immediately
         const headers = createSession(username); 
         return new Response("Account created. Logging in...", { status: 302, headers });
     } else {
-        // Fail (User exists)
         const headers = new Headers();
         headers.set("Location", "/register?error=exists");
         return new Response("User exists. Redirecting...", { status: 302, headers });
     }
 }
 
+// UPDATED: handleBuy with clearer messages
 async function handleBuy(req: Request, username: string): Promise<Response> {
     const formData = await req.formData();
     const item = formData.get("item")?.toString();
     const priceStr = formData.get("price")?.toString();
     const price = priceStr ? parseInt(priceStr) : NaN;
 
-    if (!item || isNaN(price) || price <= 0) return new Response(`Invalid item or price. <a href="/dashboard">Back</a>`, { status: 400, headers: { "Content-Type": "text/html" } });
+    if (!item || isNaN(price) || price <= 0) {
+        return new Response(`Invalid item or price. <a href="/dashboard">Back</a>`, { status: 400, headers: { "Content-Type": "text/html" } });
+    }
 
+    // Pre-check balance for a clearer error message
+    const user = await getUserByUsername(username);
+    if (!user) return handleLogout(); // Should not happen
+    if (user.balance < price) {
+        return new Response(`Purchase Failed: Insufficient Balance. You have ${user.balance} Ks but need ${price} Ks. <a href="/dashboard">Back</a>`, { status: 400, headers: { "Content-Type": "text/html" } });
+    }
+
+    // Attempt the transaction
     const success = await updateUserBalance(username, -price); 
 
     if (success) {
-        // Log the purchase
         await logTransaction(username, -price, "purchase");
-        return new Response(`Successfully bought ${item} for ${price} Ks. <a href="/dashboard">Back to Dashboard</a>`, { status: 200, headers: { "Content-Type": "text/html" } });
+        const newBalance = user.balance - price;
+        return new Response(`Purchase Successful! You bought ${item} for ${price} Ks. Your new balance is ${newBalance} Ks. <a href="/dashboard">Back to Dashboard</a>`, { status: 200, headers: { "Content-Type": "text/html" } });
     } else {
-        return new Response(`Transaction failed (Insufficient Balance or Error). <a href="/dashboard">Back to Dashboard</a>`, { status: 400, headers: { "Content-Type": "text/html" } });
+        // This is a fallback, but the pre-check should catch most errors
+        return new Response(`Transaction failed (e.g., balance changed during transaction). <a href="/dashboard">Back to Dashboard</a>`, { status: 400, headers: { "Content-Type": "text/html" } });
     }
 }
 
-// UPDATED: handleAdminTopUp now logs the transaction
 async function handleAdminTopUp(req: Request): Promise<Response> {
     const url = new URL(req.url);
     let username, amount, token;
@@ -266,7 +303,6 @@ async function handleAdminTopUp(req: Request): Promise<Response> {
     const success = await updateUserBalance(username, amount);
 
     if (success) {
-        // Log the top-up
         await logTransaction(username, amount, "topup");
         const updatedUser = await getUserByUsername(username);
         return new Response(`SUCCESS: ${username} balance updated. New balance: ${updatedUser?.balance} Ks`, { status: 200, headers: { "Content-Type": "text/html" } });
@@ -320,7 +356,6 @@ async function handler(req: Request): Promise<Response> {
         return handleDashboard(username);
     }
     
-    // NEW: User Info Page
     if (pathname === "/user-info") {
         if (!username) return handleLogout();
         return handleUserInfoPage(username);
