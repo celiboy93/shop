@@ -15,14 +15,21 @@ interface User {
 interface Transaction {
     type: "topup" | "purchase";
     amount: number;
-    timestamp: string; // Stored in UTC
-    itemName?: string; // Store the item name for purchases
+    timestamp: string; 
+    itemName?: string; 
 }
 interface Product {
     id: string; 
     name: string; 
     price: number; 
     imageUrl: string; 
+}
+// NEW: Structure for Voucher Codes
+interface Voucher {
+    code: string; // The redeemable code (e.g., SHOP-12345)
+    value: number; // How much it is worth
+    isUsed: boolean; // To prevent reuse
+    generatedAt: string;
 }
 
 // ----------------------------------------------------
@@ -61,6 +68,16 @@ async function updateUserBalance(username: string, amountChange: number): Promis
         const res = await kv.atomic().check(result).set(key, { ...user, balance: newBalance }).commit();
         if (res.ok) return true; 
     }
+}
+
+async function resetUserPassword(username: string, newPasswordHash: string): Promise<boolean> {
+    const key = ["users", username];
+    const result = await kv.get<User>(key);
+    const user = result.value;
+    if (!user) return false; 
+    user.passwordHash = newPasswordHash;
+    const res = await kv.atomic().check(result).set(key, user).commit();
+    return res.ok;
 }
 
 async function logTransaction(username: string, amount: number, type: "topup" | "purchase", itemName?: string): Promise<void> {
@@ -115,6 +132,39 @@ async function deleteProduct(id: string): Promise<void> {
     await kv.delete(key);
 }
 
+// --- NEW: Voucher KV Functions ---
+async function generateVoucher(value: number): Promise<Voucher> {
+    // Generate a simple, unique-ish code
+    const code = `SHOP-${Date.now().toString().slice(-6)}`; 
+    const voucher: Voucher = {
+        code,
+        value,
+        isUsed: false,
+        generatedAt: new Date().toISOString()
+    };
+    const key = ["vouchers", code];
+    await kv.set(key, voucher);
+    return voucher;
+}
+
+async function getVoucherByCode(code: string): Promise<{value: Voucher, versionstamp: string} | null> {
+    const key = ["vouchers", code];
+    const result = await kv.get<{value: Voucher, versionstamp: string}>(key);
+    if (!result.value) return null;
+    return result;
+}
+
+async function getUnusedVouchers(): Promise<Voucher[]> {
+    const entries = kv.list<Voucher>({ prefix: ["vouchers"] });
+    const vouchers: Voucher[] = [];
+    for await (const entry of entries) {
+        if (!entry.value.isUsed) {
+            vouchers.push(entry.value);
+        }
+    }
+    return vouchers.sort((a, b) => new Date(b.generatedAt).getTime() - new Date(a.generatedAt).getTime());
+}
+
 // ----------------------------------------------------
 // Authentication Helpers
 // ----------------------------------------------------
@@ -158,12 +208,7 @@ const globalStyles = `
     button { background-color: #007bff; color: white; border: none; padding: 12px 20px; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: 600; width: 100%; }
     .error { color: #dc3545; background-color: #f8d7da; padding: 10px; border-radius: 5px; margin-bottom: 15px; }
     input[type="text"], input[type="password"], input[type="number"], input[type="url"] { 
-        width: 95%; 
-        padding: 12px 10px; 
-        margin-top: 5px; 
-        border: 1px solid #ddd; 
-        border-radius: 8px; 
-        font-size: 16px; 
+        width: 95%; padding: 12px 10px; margin-top: 5px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; 
     }
     label { font-weight: 600; color: #555; }
     .checkbox-container { display: flex; align-items: center; margin-top: 15px; }
@@ -204,13 +249,34 @@ function renderRegisterForm(req: Request): Response {
     return new Response(html, { headers: HTML_HEADERS });
 }
 
+// NEW: Page for user to redeem a voucher
+function renderRedeemPage(req: Request): Response {
+    const url = new URL(req.url);
+    const error = url.searchParams.get("error");
+    
+    let errorHtml = "";
+    if (error === 'invalid') errorHtml = '<p class="error">This voucher code is not valid.</p>';
+    if (error === 'used') errorHtml = '<p class="error">This voucher code has already been used.</p>';
+
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Redeem Voucher</title><style>${globalStyles} button.redeem{background-color:#17a2b8;}</style></head>
+        <body><div class="container"><h1>Redeem Voucher</h1>${errorHtml} 
+        <form action="/redeem_voucher" method="POST">
+        <label for="code">Voucher Code:</label><br>
+        <input type="text" id="code" name="code" required style="text-transform: uppercase;"><br><br>
+        <button type="submit" class="redeem">Redeem Now</button></form>
+        <p style="margin-top:20px; text-align:center;"><a href="/dashboard">Back to Shop</a></p></div></body></html>`;
+    return new Response(html, { headers: HTML_HEADERS });
+}
+
+
 async function renderAdminPanel(token: string, message: string | null): Promise<Response> {
     let messageHtml = "";
     if (message === "topup_success") messageHtml = `<div class="success-msg">User balance updated!</div>`;
     if (message === "product_added") messageHtml = `<div class="success-msg">Product added!</div>`;
     if (message === "product_updated") messageHtml = `<div class="success-msg">Product updated!</div>`;
-    if (message === "product_deleted") messageHtml = `<div class"success-msg" style="background-color:#f8d7da; color:#721c24;">Product deleted!</div>`;
+    if (message === "product_deleted") messageHtml = `<div class="success-msg" style="background-color:#f8d7da; color:#721c24;">Product deleted!</div>`;
     if (message === "pass_reset_success") messageHtml = `<div class="success-msg">User password reset successfully!</div>`;
+    if (message === "voucher_created") messageHtml = `<div class="success-msg">Voucher created successfully!</div>`;
 
     const products = await getProducts();
     const productListHtml = products.map(p => `
@@ -225,18 +291,32 @@ async function renderAdminPanel(token: string, message: string | null): Promise<
         </div>
     `).join('');
 
+    // NEW: Get list of unused vouchers
+    const vouchers = await getUnusedVouchers();
+    const voucherListHtml = vouchers.map(v => `
+        <div class="voucher-item">
+            <code class="voucher-code">${v.code}</code>
+            <span class="voucher-value">${formatCurrency(v.value)} Ks</span>
+        </div>
+    `).join('');
+
     const html = `
         <!DOCTYPE html><html lang="my"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Admin Panel</title>
         <style>${globalStyles}
-            button.admin{background-color:#28a745;} button.product{background-color:#ffc107; color:black;} button.reset{background-color:#dc3545;}
+            button.admin{background-color:#28a745;} button.product{background-color:#ffc107; color:black;} button.reset{background-color:#dc3545;} button.voucher{background-color:#17a2b8;}
             hr{margin:30px 0; border:0; border-top:1px solid #eee;}
             .success-msg { padding: 10px; background-color: #d4edda; color: #155724; border-radius: 5px; margin-bottom: 15px; }
-            .product-item { display:flex; justify-content:space-between; align-items:center; padding:10px; border-bottom:1px solid #eee; }
+            .product-item, .voucher-item { display:flex; justify-content:space-between; align-items:center; padding:10px; border-bottom:1px solid #eee; }
             .edit-btn { background-color:#007bff; color:white; padding:5px 10px; border-radius:4px; font-size: 14px; }
             .delete-btn { background-color:#dc3545; padding:5px 10px; font-size: 14px; }
+            .voucher-code { font-weight: bold; background: #eee; padding: 3px 6px; border-radius: 4px; }
         </style></head>
         <body><div class="container" style="max-width: 700px;">
             ${messageHtml}
+            <h2>Generate Voucher Code</h2>
+            <form action="/admin/create_voucher" method="POST"><input type="hidden" name="token" value="${token}"><label>Voucher Value (Ks):</label><input type="number" name="amount" required><br><br><button type="submit" class="voucher">Generate Code</button></form>
+            <div class="voucher-list"><h3>Unused Vouchers:</h3>${vouchers.length > 0 ? voucherListHtml : '<p>No unused vouchers.</p>'}</div><hr>
+            
             <h2>Product Management</h2><div class="product-list">${products.length > 0 ? productListHtml : '<p>No products yet.</p>'}</div><hr>
             <h2>Add New Product</h2>
             <form action="/admin/add_product" method="POST"><input type="hidden" name="token" value="${token}"><label>Product Name:</label><input type="text" name="name" required><br><br><label>Price (Ks):</label><input type="number" name="price" required><br><br><label>Image URL (or Emoji):</label><input type="url" name="imageUrl" required><br><br><button type="submit" class="product">Add Product</button></form><hr>
@@ -301,6 +381,8 @@ async function handleDashboard(username: string): Promise<Response> {
             .nav-links a { display: block; padding: 10px 15px; border-radius: 8px; text-align: center; font-weight: 600; text-decoration: none; }
             .info-btn { background-color: #007bff; color: white; border: 1px solid #007bff; }
             .logout-btn { background-color: #ffffff; color: #007bff; border: 1px solid #007bff; }
+            /* NEW */ .redeem-btn { background-color: #17a2b8; color: white; border: 1px solid #17a2b8; flex: 1; }
+            
             .balance-box { background: linear-gradient(90deg, #007bff, #0056b3); color: white; padding: 20px; border-radius: 12px; margin-bottom: 25px; text-align: center; }
             .balance-label { font-size: 16px; opacity: 0.9; }
             .balance-amount { font-size: 2.5em; font-weight: 700; letter-spacing: 1px; }
@@ -322,6 +404,8 @@ async function handleDashboard(username: string): Promise<Response> {
                 <div class="balance-label">Welcome, ${user.username}!</div>
                 <div class="balance-amount">${formatCurrency(user.balance)} Ks</div>
             </div>
+            <a href="/redeem" class="redeem-btn" style="width: 90%; text-align:center; margin-bottom: 25px;">Redeem Voucher Code</a>
+            
             <h2>🛒 Shop Items:</h2>
             <div class="product-grid">
                 ${products.length > 0 ? productListHtml : '<p>No products available yet.</p>'}
@@ -343,9 +427,6 @@ async function handleDashboard(username: string): Promise<Response> {
     return new Response(html, { headers: HTML_HEADERS });
 }
 
-// ----------------------------------------------------
-// (!!!!) USER INFO FUNCTION - UI UPDATED (!!!!)
-// ----------------------------------------------------
 async function handleUserInfoPage(username: string): Promise<Response> {
     const user = await getUserByUsername(username);
     if (!user) return handleLogout();
@@ -357,13 +438,19 @@ async function handleUserInfoPage(username: string): Promise<Response> {
         catch (e) { return utcString; }
     }
 
-    // UPDATED: Changed text "Received" to "Top Up"
     const topUpHistory = transactions.filter(t => t.type === 'topup')
-        .map(t => `<li class="topup"><span><strong>Top Up</strong> <strong>${formatCurrency(t.amount)} Ks</strong></span><span class="time">${toMyanmarTime(t.timestamp)}</span></li>`).join('');
+        .map(t => `
+            <li class="topup">
+                <span><strong>${t.itemName || 'Top Up'}</strong> <strong>${formatCurrency(t.amount)} Ks</strong></span>
+                <span class="time">${toMyanmarTime(t.timestamp)}</span>
+            </li>`).join('');
     
     const purchaseHistory = transactions.filter(t => t.type === 'purchase')
-        .map(t => `<li class="purchase"><span>Bought <strong>${t.itemName || 'an item'}</strong> for <strong>${formatCurrency(Math.abs(t.amount))} Ks</strong></span><span class="time">${toMyanmarTime(t.timestamp)}</span></li>`)
-        .join('');
+        .map(t => `
+            <li class="purchase">
+                <span>Bought <strong>${t.itemName || 'an item'}</strong> for <strong>${formatCurrency(Math.abs(t.amount))} Ks</strong></span>
+                <span class="time">${toMyanmarTime(t.timestamp)}</span>
+            </li>`).join('');
 
     const html = `
         <!DOCTYPE html><html lang="my"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>My Info</title>
@@ -379,6 +466,7 @@ async function handleUserInfoPage(username: string): Promise<Response> {
             .history li.topup { border-left-color: #28a745; }
             .history li.purchase { border-left-color: #ffc107; }
             .history li .time { font-size: 0.9em; color: #777; }
+            .redeem-link { display:block; text-align:center; margin: 20px 0; padding: 12px; background-color: #17a2b8; color: white; border-radius: 8px; font-weight: 600; }
         </style></head>
         <body><div class="container">
         <div class="header-card">
@@ -386,7 +474,7 @@ async function handleUserInfoPage(username: string): Promise<Response> {
             <div class="info-item"><strong>Username:</strong> ${user.username}</div>
             <div class="info-item"><strong>Balance:</strong> <span class="balance">${formatCurrency(user.balance)} Ks</span></div>
         </div>
-        <p style="font-size:0.9em; color:gray; text-align: center;">(For security, passwords are never shown.)</p>
+        <a href="/redeem" class="redeem-link">Redeem a Voucher Code</a>
         <div class="history"><h2>Top-Up History</h2>${topUpHistory.length > 0 ? `<ul>${topUpHistory}</ul>` : '<p>You have not received any top-ups yet.</p>'}</div>
         <div class="history"><h2>Purchase History</h2>${purchaseHistory.length > 0 ? `<ul>${purchaseHistory}</ul>` : '<p>You have not made any purchases yet.</p>'}</div>
         <a href="/dashboard" style="display:block; text-align:center; margin-top:20px;">Back to Shop</a></div></body></html>`;
@@ -561,6 +649,65 @@ async function handleResetPassword(formData: FormData): Promise<Response> {
     }
 }
 
+// NEW: Handler to redeem a voucher
+async function handleRedeemVoucher(formData: FormData, username: string): Promise<Response> {
+    const code = formData.get("code")?.toString().toUpperCase();
+    
+    if (!code) {
+        return renderMessagePage("Error", "Please enter a voucher code.", true, "/redeem");
+    }
+
+    // 1. Find the voucher
+    const result = await getVoucherByCode(code);
+    if (!result || !result.value) {
+        return renderMessagePage("Error", "This voucher code is not valid.", true, "/redeem");
+    }
+    
+    const voucher = result.value;
+    
+    // 2. Check if used
+    if (voucher.isUsed) {
+        return renderMessagePage("Error", "This voucher code has already been used.", true, "/redeem");
+    }
+    
+    // 3. Invalidate the voucher (Atomic operation)
+    const atomicRes = await kv.atomic()
+        .check(result) // Ensure no one else is redeeming it at the same time
+        .set(result.key, { ...voucher, isUsed: true })
+        .commit();
+        
+    if (!atomicRes.ok) {
+        return renderMessagePage("Error", "Redemption failed (race condition). Please try again.", true, "/redeem");
+    }
+    
+    // 4. Add balance to user
+    await updateUserBalance(username, voucher.value);
+    
+    // 5. Log transaction
+    await logTransaction(username, voucher.value, "topup", `Voucher: ${voucher.code}`);
+    
+    const message = `Success! <strong>${formatCurrency(voucher.value)} Ks</strong> has been added to your balance.`;
+    return renderMessagePage("Voucher Redeemed!", message, false); // Auto-redirects to dashboard
+}
+
+// NEW: Handler to create a voucher
+async function handleCreateVoucher(formData: FormData): Promise<Response> {
+    const amountStr = formData.get("amount")?.toString();
+    const amount = amountStr ? parseInt(amountStr) : NaN;
+    const token = formData.get("token")?.toString();
+    const adminBackLink = `/admin/panel?token=${token}`;
+    
+    if (isNaN(amount) || amount <= 0) {
+        return renderMessagePage("Error", "Invalid amount.", true, adminBackLink);
+    }
+    
+    await generateVoucher(amount);
+    
+    const headers = new Headers();
+    headers.set("Location", `/admin/panel?token=${token}&message=voucher_created`);
+    return new Response("Redirecting...", { status: 302, headers });
+}
+
 
 function handleLogout(): Response {
     const headers = new Headers();
@@ -582,6 +729,7 @@ async function handler(req: Request): Promise<Response> {
         if (pathname === "/login") return renderLoginForm(req); 
         if (pathname === "/register") return renderRegisterForm(req); 
         if (pathname === "/logout") return handleLogout();
+        if (pathname === "/redeem") return renderRedeemPage(req); // NEW
 
         // Admin GET
         const token = url.searchParams.get("token");
@@ -619,11 +767,13 @@ async function handler(req: Request): Promise<Response> {
         if (pathname === "/auth") return await handleAuth(formData);
         if (pathname === "/doregister") return await handleRegister(formData);
 
-        // User 'Buy' POST (Protected)
-        if (pathname === "/buy") {
+        // User 'Buy' & 'Redeem' POST (Protected)
+        if (pathname === "/buy" || pathname === "/redeem_voucher") {
             const username = getUsernameFromCookie(req);
             if (!username) return handleLogout(); // Must be logged in
-            return await handleBuy(formData, username);
+            
+            if (pathname === "/buy") return await handleBuy(formData, username);
+            if (pathname === "/redeem_voucher") return await handleRedeemVoucher(formData, username); // NEW
         }
 
         // Admin POST (Protected)
@@ -637,6 +787,7 @@ async function handler(req: Request): Promise<Response> {
         if (pathname === "/admin/update_product") return await handleUpdateProduct(formData);
         if (pathname === "/admin/delete_product") return await handleDeleteProduct(formData);
         if (pathname === "/admin/reset_password") return await handleResetPassword(formData); 
+        if (pathname === "/admin/create_voucher") return await handleCreateVoucher(formData); // NEW
     }
 
     // --- Default Route (Redirect all other requests to login) ---
