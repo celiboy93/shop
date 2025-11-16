@@ -16,26 +16,15 @@ interface User {
 interface Transaction {
     type: "topup" | "purchase";
     amount: number;
-    timestamp: string; 
-    itemName?: string; 
-    itemDetails?: string; 
-}
-// NEW: For admin sales history
-interface DigitalSaleLog {
-    username: string;
-    itemName?: string;
-    itemDetails?: string;
-    timestamp: string;
-    amount: number;
+    timestamp: string; // Stored in UTC
+    itemName?: string; // Store the item name for purchases
 }
 interface Product {
     id: string; 
     name: string; 
     price: number; 
-    salePrice?: number | null;
+    salePrice?: number | null; // NEW: For Flash Sales
     imageUrl: string; 
-    isDigital: boolean; 
-    stock: string[]; 
 }
 interface Voucher {
     code: string; 
@@ -71,12 +60,7 @@ async function getUserByUsername(username: string): Promise<User | null> {
 }
 
 async function registerUser(username: string, passwordHash: string): Promise<boolean> {
-    const user: User = { 
-        username, 
-        passwordHash, 
-        balance: 0, 
-        isBlocked: false 
-    };
+    const user: User = { username, passwordHash, balance: 0 };
     const key = ["users", username];
     const res = await kv.atomic().check({ key, versionstamp: null }).set(key, user).commit();
     return res.ok;
@@ -105,21 +89,6 @@ async function resetUserPassword(username: string, newPasswordHash: string): Pro
     return res.ok;
 }
 
-async function toggleBlockUser(username: string): Promise<string> {
-    const key = ["users", username];
-    const result = await kv.get<User>(key);
-    const user = result.value;
-    if (!user) return "User not found.";
-    const newStatus = !user.isBlocked;
-    user.isBlocked = newStatus;
-    const res = await kv.atomic().check(result).set(key, user).commit();
-    if (res.ok) {
-        return newStatus ? `User '${username}' has been BLOCKED.` : `User '${username}' has been UNBLOCKED.`;
-    }
-    return "Failed to update user status.";
-}
-
-
 async function transferBalance(senderUsername: string, recipientUsername: string, amount: number): Promise<string> {
     if (senderUsername === recipientUsername) return "Cannot send money to yourself.";
     if (amount <= 0) return "Amount must be positive.";
@@ -135,9 +104,6 @@ async function transferBalance(senderUsername: string, recipientUsername: string
 
         const sender = senderResult.value;
         const recipient = recipientResult.value;
-
-        if (sender.isBlocked) return "Your account is suspended.";
-        if (recipient.isBlocked) return "Recipient account is suspended.";
 
         if (sender.balance < amount) {
             return `Insufficient balance. You only have ${formatCurrency(sender.balance)} Ks.`;
@@ -176,26 +142,6 @@ async function getTransactions(username: string): Promise<Transaction[]> {
     }
     return transactions;
 }
-
-// Function to get all digital sales for Admin
-async function getDigitalSalesHistory(): Promise<DigitalSaleLog[]> {
-    const entries = kv.list<Transaction>({ prefix: ["transactions"] });
-    const logs: DigitalSaleLog[] = [];
-    for await (const entry of entries) {
-        const t = entry.value;
-        if (t.type === 'purchase' && t.itemDetails) {
-            logs.push({
-                username: entry.key[1] as string, 
-                itemName: t.itemName,
-                itemDetails: t.itemDetails,
-                timestamp: t.timestamp,
-                amount: t.amount
-            });
-        }
-    }
-    return logs.sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()); 
-}
-
 
 // --- Product KV Functions ---
 async function getProducts(): Promise<Product[]> {
@@ -659,7 +605,7 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
             .avatar { width: 60px; height: 60px; border-radius: 50%; background-color: #eee; margin-right: 15px; display: flex; justify-content: center; align-items: center; overflow: hidden; }
             .avatar svg { width: 32px; height: 32px; color: #aaa; }
             /* FIXED: Alignment */
-            .profile-info { display: flex; align-items: baseline; gap: 10px; } 
+            .profile-info { display: flex; align-items: center; gap: 10px; } 
             .profile-name { font-size: 1.8em; font-weight: 600; color: #333; margin: 0; user-select: all; }
             .copy-btn-small { background: #007bff; color: white; border: none; padding: 5px 10px; font-size: 12px; border-radius: 5px; cursor: pointer; flex-shrink: 0; }
             
