@@ -12,7 +12,7 @@ interface User {
     passwordHash: string;
     balance: number;
     isBlocked?: boolean; 
-    receivedBonus: boolean; // NEW: To track global bonus
+    receivedBonus?: boolean; // NEW: To track global bonus
 }
 interface Transaction {
     type: "topup" | "purchase";
@@ -56,7 +56,6 @@ interface PaymentInfo {
     waveNumber: string;
     waveName: string;
 }
-// NEW: Global Bonus Structure
 interface GlobalBonus {
     isActive: boolean;
     amount: number;
@@ -333,18 +332,16 @@ async function setGlobalBonus(amount: number): Promise<void> {
     const key = ["global_bonus"];
     if (amount > 0) {
         await kv.set(key, { amount: amount, isActive: true });
-    } else {
-        await kv.set(key, { amount: 0, isActive: false });
-        // Reset all users' 'receivedBonus' flag
+        // Reset all users' 'receivedBonus' flag so they can get it
         const entries = kv.list<User>({ prefix: ["users"] });
         const mutations = [];
         for await (const entry of entries) {
-            if (entry.value.receivedBonus) {
-                 entry.value.receivedBonus = false; 
-                 mutations.push(kv.set(entry.key, entry.value));
-            }
+            entry.value.receivedBonus = false; 
+            mutations.push(kv.set(entry.key, entry.value));
         }
         await Promise.all(mutations);
+    } else {
+        await kv.set(key, { amount: 0, isActive: false });
     }
 }
 
@@ -510,7 +507,7 @@ async function renderAdminPanel(token: string, message: string | null): Promise<
         </style></head>
         <body><div class="container" style="max-width: 700px;">
             ${messageHtml}
-            
+
             <h2>Global Bonus Event</h2>
             <form action="/admin/set_global_bonus" method="POST">
                 <input type="hidden" name="token" value="${token}">
@@ -518,7 +515,7 @@ async function renderAdminPanel(token: string, message: string | null): Promise<
                 <input type="number" name="amount" value="${currentBonus?.isActive ? currentBonus.amount : '0'}" required><br><br>
                 <button type="submit" class="admin">Set Global Bonus</button>
             </form><hr>
-
+            
             <h2>Set Payment Info</h2>
             <form action="/admin/set_payment_info" method="POST">
                 <input type="hidden" name="token" value="${token}">
@@ -702,9 +699,7 @@ async function handleDashboard(user: User): Promise<Response> {
     return new Response(html, { headers: HTML_HEADERS });
 }
 
-// ----------------------------------------------------
-// (!!!!) USER INFO FUNCTION - UI UPDATED (!!!!)
-// ----------------------------------------------------
+// UPDATED: User Info UI (Alignment, Scroll, Inline Redeem, How to Top Up, Purchased Codes)
 async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
     const transactions = await getTransactions(user.username);
     
@@ -742,7 +737,7 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
                 </div>
                 <div class="actions">
                     <span class="time">${toMyanmarTime(t.timestamp)}</span>
-                    <button class="copy-btn" onclick="copyToClipboard('${codeId}', this)">Copy</button>
+                    <button class="copy-btn" onclick="copyToClipboard('${codeId}', this, 'Copy')">Copy</button>
                 </div>
             </li>
             `;
@@ -754,7 +749,7 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
     if (paymentInfo) {
         paymentHtml = `
         <div class="form-box payment-info">
-            <h2>${paymentInfo.instructions ? 'ငွေဖြည့်နည်း' : ''}</h2>
+            <h2>ငွေဖြည့်နည်း</h2>
             <p style="margin-top:0; color:#555;">${paymentInfo.instructions || ''}</p>
             <div class="payment-list">
                 <a href="https://t.me/${paymentInfo.telegramUser}" target="_blank" class="telegram-link">
@@ -876,7 +871,8 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
                 const text = document.getElementById(elementId).innerText;
                 navigator.clipboard.writeText(text).then(() => {
                     buttonElement.innerText = "Copied!";
-                    setTimeout(() => { buttonElement.innerText = "Copy Username"; }, 2000);
+                    const originalText = elementId === 'username-text' ? 'Copy Username' : 'Copy';
+                    setTimeout(() => { buttonElement.innerText = originalText; }, 2000);
                 }, (err) => {
                     alert("Failed to copy.");
                 });
@@ -891,7 +887,6 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
 // Action Handlers (Processing POST requests)
 // ----------------------------------------------------
 
-// UPDATED: Now handles Global Bonus
 async function handleAuth(formData: FormData): Promise<Response> {
     const username = formData.get("username")?.toString();
     const password = formData.get("password")?.toString();
@@ -902,13 +897,15 @@ async function handleAuth(formData: FormData): Promise<Response> {
         headers.set("Location", "/login?error=missing");
         return new Response("Redirecting...", { status: 302, headers });
     }
-    const user = await getUserByUsername(username);
-    if (!user) {
+    const userResult = await kv.get<User>(["users", username]); // Fetch with versionstamp
+    if (!userResult.value) {
         const headers = new Headers();
         headers.set("Location", "/login?error=invalid");
         return new Response("Redirecting...", { status: 302, headers });
     }
     
+    const user = userResult.value;
+
     if (user.isBlocked) {
         const headers = new Headers();
         headers.set("Location", "/login?error=blocked");
@@ -921,21 +918,19 @@ async function handleAuth(formData: FormData): Promise<Response> {
         return new Response("Redirecting...", { status: 302, headers });
     }
     
-    // --- CHECK FOR GLOBAL BONUS ---
+    // --- (FIXED) CHECK FOR GLOBAL BONUS ---
     const bonus = await getGlobalBonus();
-    // Check if bonus is active AND user hasn't received it
     if (bonus && bonus.isActive && !user.receivedBonus) {
-        const success = await updateUserBalance(username, bonus.amount);
-        if (success) {
+        const newBalance = user.balance + bonus.amount;
+        const updatedUser = { ...user, balance: newBalance, receivedBonus: true };
+        
+        const res = await kv.atomic()
+            .check(userResult) // Use the versionstamp from the initial get
+            .set(userResult.key, updatedUser)
+            .commit();
+
+        if (res.ok) {
             await logTransaction(username, bonus.amount, "topup", "Event Bonus");
-            
-            // Mark bonus as received
-            const userKey = ["users", user.username];
-            const userResult = await kv.get<User>(userKey); // Re-fetch to get versionstamp
-            if (userResult.value) {
-                const updatedUser = { ...userResult.value, receivedBonus: true };
-                await kv.atomic().check(userResult).set(userKey, updatedUser).commit();
-            }
         }
     }
     // --- END BONUS CHECK ---
