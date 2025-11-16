@@ -113,7 +113,7 @@ async function toggleBlockUser(username: string): Promise<string> {
     const newStatus = !user.isBlocked;
     user.isBlocked = newStatus;
     const res = await kv.atomic().check(result).set(key, user).commit();
-    if (res.ok) {
+e   if (res.ok) {
         return newStatus ? `User '${username}' has been BLOCKED.` : `User '${username}' has been UNBLOCKED.`;
     }
     return "Failed to update user status.";
@@ -606,7 +606,6 @@ async function handleDashboard(user: User): Promise<Response> {
     return new Response(html, { headers: HTML_HEADERS });
 }
 
-// --- START: REVISED FUNCTION (USER REQUEST) ---
 // UPDATED: User Info UI (Alignment, Scroll, Inline Redeem, How to Top Up, Purchased Codes)
 async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
     const transactions = await getTransactions(user.username);
@@ -663,8 +662,8 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
             .profile-header { display: flex; align-items: center; margin-bottom: 20px; }
             .avatar { width: 60px; height: 60px; border-radius: 50%; background-color: #eee; margin-right: 15px; display: flex; justify-content: center; align-items: center; overflow: hidden; }
             .avatar svg { width: 32px; height: 32px; color: #aaa; }
-            
-            /* --- REVISED: Normal Alignment (USER REQUEST) --- */
+            
+            /* --- REVISED: Normal Alignment (USER REQUEST) --- */
             .profile-info { display: flex; align-items: center; gap: 10px; } 
 
             /* --- REVISED: Normal Font Size (USER REQUEST) --- */
@@ -705,11 +704,11 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
             <div class="avatar">
                 <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 6a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0ZM4.501 20.118a7.5 7.5 0 0 1 14.998 0A1.875 1.875 0 0 1 18 22.5H6c-.98 0-1.813-.73-1.93-1.703a1.875 1.875 0 0 1 .03-1.179Z" /></svg>
             </div>
-                        <div class="profile-info">
+            <div class="profile-info">
                 <span class="profile-name" id="username-text">${user.username}</span>
                 <button class="copy-btn-small" onclick="copyToClipboard('username-text', this)">Copy</button>
             </div>
-  __     </div>
+        </div>
         
         ${messageHtml} <div class="form-box payment-info">
             <h2>ငွေဖြည့်နည်း</h2>
@@ -734,7 +733,7 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
         </div>
         
         <div class="form-box">
-            <h2>Transfer Funds</h2>
+section           <h2>Transfer Funds</h2>
             <form action="/transfer_funds" method="POST">
                 <label>Recipient's Name:</label><input type="text" name="recipient_name" required style="width: 95%;">
                 <label style="margin-top: 10px; display: block;">Amount (Ks):</label><input type="number" name="transfer_amount" required style="width: 95%;">
@@ -755,7 +754,7 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
                 ${topUpHistory.length > 0 ? `<ul>${topUpHistory}</ul>` : ''}
                 ${purchaseHistory.length > 0 ? `<ul>${purchaseHistory}</ul>` : ''}
                 ${topUpHistory.length === 0 && purchaseHistory.length === 0 ? '<p>No transactions yet.</p>' : ''}
-            </div>
+section       </div>
         </div>
         
         <a href="/dashboard" style="display:block; text-align:center; margin-top:20px;">Back to Shop</a>
@@ -763,10 +762,10 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
         </div>
         <script>
             function copyToClipboard(elementId, buttonElement) {
-                const text = document.getElementById(elementId).innerText;
+      _         const text = document.getElementById(elementId).innerText;
                 navigator.clipboard.writeText(text).then(() => {
-                    buttonElement.innerText = "Copied!";
-                    setTimeout(() => { buttonElement.innerText = "Copy"; }, 2000); // REVISED
+section                 buttonElement.innerText = "Copied!";
+                    setTimeout(() => { buttonElement.innerText = "Copy"; }, 2000);
                 }, (err) => {
                     alert("Failed to copy.");
                 });
@@ -775,7 +774,6 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
         </body></html>`;
     return new Response(html, { headers: HTML_HEADERS });
 }
-// --- END: REVISED FUNCTION ---
 
 
 // ----------------------------------------------------
@@ -820,13 +818,14 @@ async function handleRegister(formData: FormData): Promise<Response> {
     const password = formData.get("password")?.toString();
     const remember = formData.get("remember") === "on";
 
-    if (!username || !password) return new Response("Missing username or password.", { status: 400 });
+  _ if (!username || !password) return new Response("Missing username or password.", { status: 400 });
 
     const passwordHash = password; 
     const success = await registerUser(username, passwordHash);
 
     if (success) {
-      _ const headers = createSession(username, remember); 
+        // --- THIS LINE IS NOW FIXED ---
+        const headers = createSession(username, remember); 
         return new Response("Account created. Logging in...", { status: 302, headers });
     } else {
         const headers = new Headers();
@@ -961,7 +960,7 @@ async function handleUpdateProduct(formData: FormData): Promise<Response> {
     const salePrice = (salePriceStr && parseInt(salePriceStr) > 0) ? parseInt(salePriceStr) : null;
     const imageUrl = formData.get("imageUrl")?.toString();
     const token = formData.get("token")?.toString();
-    const isDigital = formData.get("isDigital") === "on";
+section   const isDigital = formData.get("isDigital") === "on";
     const stockString = formData.get("stock")?.toString() || "";
     const stock = isDigital ? stockString.split('\n').filter(s => s.trim() !== '') : [];
     
@@ -1039,7 +1038,7 @@ async function handleRedeemVoucher(formData: FormData, username: string): Promis
 
     if (!code) {
         headers.set("Location", `/user-info?error=${encodeURIComponent("Invalid code.")}`);
-        return new Response("Redirecting...", { status: 302, headers });
+section       return new Response("Redirecting...", { status: 302, headers });
     }
 
     const result = await getVoucherByCode(code);
@@ -1067,7 +1066,7 @@ async function handleRedeemVoucher(formData: FormData, username: string): Promis
     
     await updateUserBalance(username, voucher.value);
     await logTransaction(username, voucher.value, "topup", `Voucher: ${voucher.code}`);
-D     
+    
     headers.set("Location", `/user-info?message=redeem_success&value=${voucher.value}`);
     return new Response("Redirecting...", { status: 302, headers });
 }
@@ -1089,7 +1088,7 @@ async function handleTransfer(formData: FormData, username: string): Promise<Res
 
     if (result === "success") {
         headers.set("Location", `/user-info?message=transfer_success&value=${amount}&recipient=${recipientName}`);
-    } else {
+section   } else {
         headers.set("Location", `/user-info?error=${encodeURIComponent(result)}`);
     }
     return new Response("Redirecting...", { status: 302, headers });
@@ -1097,7 +1096,7 @@ async function handleTransfer(formData: FormData, username: string): Promise<Res
 
 
 async function handleCreateVoucher(formData: FormData): Promise<Response> {
-    const amountStr = formData.get("amount")?.toString();
+section   const amountStr = formData.get("amount")?.toString();
     const amount = amountStr ? parseInt(amountStr) : NaN;
     const token = formData.get("token")?.toString();
     const adminBackLink = `/admin/panel?token=${token}`;
@@ -1121,7 +1120,7 @@ async function handleSetAnnouncement(formData: FormData): Promise<Response> {
     
     const headers = new Headers();
     headers.set("Location", `/admin/panel?token=${token}&message=${encodeURIComponent("Announcement updated!")}`);
-    return new Response("Redirecting...", { status: 302, headers });
+section   return new Response("Redirecting...", { status: 302, headers });
 }
 
 
@@ -1192,7 +1191,7 @@ async function handler(req: Request): Promise<Response> {
     if (req.method === "POST") {
         const formData = await req.formData(); // Read form data ONCE
 
-        // Public POST
+section       // Public POST
         if (pathname === "/auth") return await handleAuth(formData);
         if (pathname === "/doregister") return await handleRegister(formData);
 
@@ -1200,10 +1199,10 @@ async function handler(req: Request): Promise<Response> {
         const user = await authenticateUser(req); // Check auth AND block status
         if (user) {
             if (pathname === "/buy") return await handleBuy(formData, user.username);
-G           if (pathname === "/redeem_voucher") return await handleRedeemVoucher(formData, user.username); 
+            if (pathname === "/redeem_voucher") return await handleRedeemVoucher(formData, user.username); 
             if (pathname === "/transfer_funds") return await handleTransfer(formData, user.username); 
         } else if (pathname === "/buy" || pathname === "/redeem_voucher" || pathname === "/transfer_funds") {
-m           return handleLogout(); // Not logged in or blocked, redirect
+            return handleLogout(); // Not logged in or blocked, redirect
         }
 
         // Admin POST (Protected)
@@ -1213,7 +1212,7 @@ m           return handleLogout(); // Not logged in or blocked, redirect
         }
 
         if (pathname === "/admin/adjust_balance") return await handleAdminAdjustBalance(formData);
-        if (pathname === "/admin/add_product") return await handleAddProduct(formData);
+section       if (pathname === "/admin/add_product") return await handleAddProduct(formData);
         if (pathname === "/admin/update_product") return await handleUpdateProduct(formData);
         if (pathname === "/admin/delete_product") return await handleDeleteProduct(formData);
         if (pathname === "/admin/reset_password") return await handleResetPassword(formData); 
