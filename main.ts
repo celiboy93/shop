@@ -18,7 +18,6 @@ interface Transaction {
     amount: number;
     timestamp: string; 
     itemName?: string; 
-    itemDetails?: string; // NEW: To store the actual code/account
 }
 interface Product {
     id: string; 
@@ -330,6 +329,7 @@ function renderRegisterForm(req: Request): Response {
     return new Response(html, { headers: HTML_HEADERS });
 }
 
+// UPDATED: Admin Panel now includes "Adjust Balance"
 async function renderAdminPanel(token: string, message: string | null): Promise<Response> {
     let messageHtml = "";
     if (message) messageHtml = `<div class="success-msg">${decodeURIComponent(message)}</div>`;
@@ -534,7 +534,9 @@ async function handleDashboard(user: User): Promise<Response> {
     return new Response(html, { headers: HTML_HEADERS });
 }
 
-// UPDATED: User Info UI (Alignment, Scroll, Inline Redeem, How to Top Up, Purchased Codes)
+// ----------------------------------------------------
+// (!!!!) USER INFO FUNCTION - UI UPDATED (!!!!)
+// ----------------------------------------------------
 async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
     const transactions = await getTransactions(user.username);
     
@@ -565,6 +567,7 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
         .map(t => `<li class="purchase"><span>${t.itemName.includes('Transfer to') ? t.itemName : `Bought <strong>${t.itemName || 'an item'}</strong>`} for <strong>${formatCurrency(Math.abs(t.amount))} Ks</strong></span><span class="time">${toMyanmarTime(t.timestamp)}</span></li>`)
         .join('');
 
+    // NEW: List of purchased digital codes
     const digitalCodesHtml = digitalPurchases
         .map((t, index) => {
             const codeId = `code-${index}`;
@@ -586,12 +589,14 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
     const html = `
         <!DOCTYPE html><html lang="my"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>My Info</title>
         <style>${globalStyles}
+            /* Profile Header */
             .profile-header { display: flex; align-items: center; margin-bottom: 20px; }
             .avatar { width: 60px; height: 60px; border-radius: 50%; background-color: #eee; margin-right: 15px; display: flex; justify-content: center; align-items: center; overflow: hidden; }
             .avatar svg { width: 32px; height: 32px; color: #aaa; }
             .profile-info { flex-grow: 1; }
             .profile-name { font-size: 1.8em; font-weight: 600; color: #333; margin: 0; }
             
+            /* Form Box */
             .form-box { margin-bottom: 25px; background: #f9f9f9; padding: 20px; border-radius: 8px; }
             .form-box h2 { margin-top: 0; }
             .form-box input { width: 90%; }
@@ -600,18 +605,21 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
             
             .history { margin-top: 25px; }
             .history h2 { border-bottom: 1px solid #eee; padding-bottom: 5px; }
+            /* Scroll Box */
             .history-list { max-height: 250px; overflow-y: auto; background-color: #fcfcfc; border: 1px solid #eee; padding: 10px; border-radius: 8px; }
             .history ul { padding-left: 0; list-style-type: none; margin: 0; }
             .history li { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; padding: 12px; background: #fff; border: 1px solid #eee; border-radius: 8px; border-left-width: 5px; }
             .history li.topup { border-left-color: #28a745; }
             .history li.purchase { border-left-color: #ffc107; }
-            .history li .time { font-size: 0.9em; color: #777; display: block; margin-bottom: 5px; }
+            .history li .time { font-size: 0.9em; color: #777; display: block; margin-top: 5px; text-align: left; }
             .voucher-code { font-size: 1.1em; color: #d63384; user-select: all; }
             .copy-btn { background-color: #007bff; color: white; border: none; padding: 5px 10px; border-radius: 5px; font-size: 12px; cursor: pointer; }
 
+            /* Payment Info Box */
             .payment-info { background: #fffbe6; border: 1px solid #ffeeba; border-radius: 8px; padding: 20px; }
             .payment-info h2 { margin-top: 0; }
             .payment-list { padding-left: 0; list-style: none; margin-top: 15px; }
+            /* FIXED: Alignment for Payment */
             .payment-account { display: grid; grid-template-columns: 100px auto; align-items: center; margin-bottom: 12px; font-size: 1.1em; }
             .payment-account strong { font-weight: 600; color: #333; }
             .payment-account .details { display: flex; flex-direction: column; }
@@ -632,8 +640,8 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
         </div>
         
         ${messageHtml} <div class="form-box payment-info">
-            <h2>How to Top Up</h2>
-            <p style="margin-top:0; color:#555;">Contact admin via Telegram to buy Voucher Codes.</p>
+            <h2>ငွေဖြည့်နည်း</h2>
+            <p style="margin-top:0; color:#555;">Voucher Code ဝယ်ယူရန် (သို့) Admin မှ တိုက်ရိုက်ငွေဖြည့်ရန် Telegram မှ ဆက်သွယ်ပါ။</p>
             <div class="payment-list">
                 <a href="https://t.me/iqowoq" target="_blank" class="telegram-link">
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M19.467 1.817a1.68 1.68 0 0 0-1.57-.002L3.58 6.471A1.68 1.68 0 0 0 2.21 7.91v1.314a1.68 1.68 0 0 0 .58 1.258l5.96 4.708a.75.75 0 0 1 .31.623v5.04a.75.75 0 0 0 1.25.59L12 19.333l3.22 2.451a.75.75 0 0 0 1.25-.59v-5.04a.75.75 0 0 1 .31-.623l5.96-4.708a1.68 1.68 0 0 0 .58-1.258V7.91a1.68 1.68 0 0 0-1.37-1.443L19.467 1.817Z" /></svg>
@@ -754,7 +762,6 @@ async function handleRegister(formData: FormData): Promise<Response> {
     }
 }
 
-// UPDATED: handleBuy now handles digital stock
 async function handleBuy(formData: FormData, username: string): Promise<Response> {
     const productId = formData.get("productId")?.toString();
     
@@ -770,26 +777,24 @@ async function handleBuy(formData: FormData, username: string): Promise<Response
     const product = productResult.value;
     const price = (product.salePrice && product.salePrice > 0) ? product.salePrice : product.price;
     const item = product.name;
-    let itemDetails: string | undefined = undefined; // This will hold the code/account
+    let itemDetails: string | undefined = undefined; 
 
-    // Check balance first
     const user = await getUserByUsername(username);
     if (!user || user.balance < price) {
         const message = `You have ${formatCurrency(user?.balance ?? 0)} Ks but need ${formatCurrency(price)} Ks. Please contact admin for a top-up.`;
         return renderMessagePage("Insufficient Balance", message, true);
     }
 
-    // --- Digital Stock Logic ---
     if (product.isDigital) {
         if (!product.stock || product.stock.length === 0) {
             return renderMessagePage("Error", "Sorry, this item is Out of Stock.", true);
         }
         
-        const itemToSell = product.stock[0]; // Get the first item
-        const newStock = product.stock.slice(1); // Get the rest of the items
+        const itemToSell = product.stock[0]; 
+        const newStock = product.stock.slice(1); 
         
         const atomicRes = await kv.atomic()
-            .check(productResult) // Check versionstamp
+            .check(productResult) 
             .set(["products", product.id], { ...product, stock: newStock })
             .commit();
             
@@ -797,9 +802,8 @@ async function handleBuy(formData: FormData, username: string): Promise<Response
             return renderMessagePage("Error", "Item was just sold! Please try again.", true);
         }
         
-        itemDetails = itemToSell; // This is the code/account
+        itemDetails = itemToSell; 
     }
-    // --- End Digital Stock Logic ---
 
     const success = await updateUserBalance(username, -price); 
 
@@ -812,7 +816,6 @@ async function handleBuy(formData: FormData, username: string): Promise<Response
 
         if (itemDetails) {
             detailsMessage = `<br><br>Your purchased item details:<br><strong style="font-size: 1.2em; color: #d63384;">${itemDetails}</strong>`;
-            // NEW: Reminder text
             reminderMessage = "<br><br><small>This page will auto-redirect. You can view this code again in your 'My Info' page.</small>";
         }
         
