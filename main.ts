@@ -28,6 +28,8 @@ interface Product {
 // ----------------------------------------------------
 // Core Helper Functions
 // ----------------------------------------------------
+
+// Helper to format numbers with commas
 function formatCurrency(amount: number): string {
     return amount.toLocaleString('en-US');
 }
@@ -35,17 +37,20 @@ function formatCurrency(amount: number): string {
 // ----------------------------------------------------
 // Core KV Functions (Data Management)
 // ----------------------------------------------------
+
 async function getUserByUsername(username: string): Promise<User | null> {
     const key = ["users", username];
     const result = await kv.get<User>(key);
     return result.value;
 }
+
 async function registerUser(username: string, passwordHash: string): Promise<boolean> {
     const user: User = { username, passwordHash, balance: 0 };
     const key = ["users", username];
     const res = await kv.atomic().check({ key, versionstamp: null }).set(key, user).commit();
     return res.ok;
 }
+
 async function updateUserBalance(username: string, amountChange: number): Promise<boolean> {
     const key = ["users", username];
     while (true) {
@@ -58,12 +63,15 @@ async function updateUserBalance(username: string, amountChange: number): Promis
         if (res.ok) return true; 
     }
 }
+
+// UPDATED: logTransaction now accepts itemName
 async function logTransaction(username: string, amount: number, type: "topup" | "purchase", itemName?: string): Promise<void> {
     const timestamp = new Date().toISOString(); 
     const key = ["transactions", username, timestamp]; 
-    const transaction: Transaction = { type, amount, timestamp, itemName };
+    const transaction: Transaction = { type, amount, timestamp, itemName }; // Save itemName
     await kv.set(key, transaction);
 }
+
 async function getTransactions(username: string): Promise<Transaction[]> {
     const entries = kv.list<Transaction>({ prefix: ["transactions", username] }, { reverse: true });
     const transactions: Transaction[] = [];
@@ -72,6 +80,7 @@ async function getTransactions(username: string): Promise<Transaction[]> {
     }
     return transactions;
 }
+
 // --- Product KV Functions ---
 async function getProducts(): Promise<Product[]> {
     const entries = kv.list<Product>({ prefix: ["products"] });
@@ -81,11 +90,13 @@ async function getProducts(): Promise<Product[]> {
     }
     return products.sort((a, b) => parseInt(a.id) - parseInt(b.id)); 
 }
+
 async function getProductById(id: string): Promise<Product | null> {
     const key = ["products", id];
     const result = await kv.get<Product>(key);
     return result.value;
 }
+
 async function addProduct(name: string, price: number, imageUrl: string): Promise<boolean> {
     const id = Date.now().toString(); 
     const product: Product = { id, name, price, imageUrl };
@@ -93,12 +104,14 @@ async function addProduct(name: string, price: number, imageUrl: string): Promis
     const res = await kv.set(key, product);
     return res.ok;
 }
+
 async function updateProduct(id: string, name: string, price: number, imageUrl: string): Promise<boolean> {
     const key = ["products", id];
     const product: Product = { id, name, price, imageUrl };
     const res = await kv.set(key, product);
     return res.ok;
 }
+
 async function deleteProduct(id: string): Promise<void> {
     const key = ["products", id];
     await kv.delete(key);
@@ -107,9 +120,11 @@ async function deleteProduct(id: string): Promise<void> {
 // ----------------------------------------------------
 // Authentication Helpers
 // ----------------------------------------------------
+
 function verifyPassword(inputPassword: string, storedHash: string): boolean {
     return inputPassword === storedHash;
 }
+
 function getUsernameFromCookie(req: Request): string | null {
     const cookieHeader = req.headers.get("Cookie");
     if (!cookieHeader || !cookieHeader.includes(SESSION_COOKIE_NAME)) return null;
@@ -120,6 +135,7 @@ function getUsernameFromCookie(req: Request): string | null {
         return null;
     }
 }
+
 function createSession(username: string): Headers {
     const headers = new Headers();
     const sessionId = username; 
@@ -131,87 +147,58 @@ function createSession(username: string): Headers {
 // ----------------------------------------------------
 // HTML Render Functions (Pages) - NEW UI
 // ----------------------------------------------------
+
 const HTML_HEADERS = { "Content-Type": "text/html; charset=utf-8" };
 
-// NEW: Global styles for all pages (centers content)
+// NEW: Modern UI Global Styles
 const globalStyles = `
-    body { 
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-        margin: 0; padding: 20px; box-sizing: border-box; 
-        background-color: #f0f2f5; 
-        display: flex; justify-content: center; align-items: center; min-height: 100vh; 
-    }
-    .container { 
-        max-width: 500px; width: 100%; 
-        padding: 2.5rem; background-color: white; 
-        border-radius: 12px; box-shadow: 0 8px 24px rgba(0,0,0,0.05); 
-    }
-    h1 { color: #1c1c1e; margin-top: 0; } 
-    h2 { border-bottom: 1px solid #e5e5e7; padding-bottom: 10px; color: #333; }
-    a { color: #007aff; text-decoration: none; }
-    button { 
-        background-color: #007aff; color: white; border: none; 
-        padding: 12px 20px; border-radius: 8px; cursor: pointer; 
-        font-weight: 600; width: 100%; font-size: 1rem;
-    }
-    .error { color: #ff3b30; background-color: #ffebe9; padding: 10px; border-radius: 5px; }
-    .success { color: #34c759; background-color: #e6f7eb; padding: 10px; border-radius: 5px; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; margin: 0; padding: 20px; background-color: #f0f2f5; display: flex; justify-content: center; align-items: center; min-height: 90vh; }
+    .container { max-width: 500px; width: 100%; padding: 30px; background-color: #ffffff; border-radius: 12px; box-shadow: 0 6px 16px rgba(0,0,0,0.1); }
+    h1 { color: #1c1e21; font-weight: 600; margin-bottom: 20px; } 
+    h2 { border-bottom: 1px solid #eee; padding-bottom: 5px; color: #333; }
+    a { color: #007bff; text-decoration: none; }
+    button { background-color: #007bff; color: white; border: none; padding: 12px 20px; border-radius: 8px; cursor: pointer; font-size: 16px; font-weight: 600; width: 100%; }
+    .error { color: #dc3545; background-color: #f8d7da; padding: 10px; border-radius: 5px; margin-bottom: 15px; }
     input[type="text"], input[type="password"], input[type="number"], input[type="url"] { 
-        width: 95%; padding: 12px; margin-top: 8px; margin-bottom: 16px;
-        border: 1px solid #c7c7cc; border-radius: 8px; font-size: 1rem; 
+        width: 95%; 
+        padding: 12px 10px; 
+        margin-top: 5px; 
+        border: 1px solid #ddd; 
+        border-radius: 8px; 
+        font-size: 16px; 
     }
-    label { font-weight: 600; color: #333; }
+    label { font-weight: 600; color: #555; }
 `;
 
-// Helper to render styled message pages (for auth failures)
-function renderMessagePage(title: string, message: string, isError = false, backLink: string | null = null): Response {
-    const borderColor = isError ? "#ff3b30" : "#34c759";
-    const linkHref = backLink || "/dashboard";
-    const linkText = backLink === null ? "Back to Shop" : "Go Back";
-
-    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${title}</title><meta name="viewport" content="width=device-width, initial-scale=1"><style>${globalStyles} .container{text-align:center; border-top:5px solid ${borderColor};} .message{font-size:1.2em; color:${isError ? '#ff3b30' : '#333'};}</style></head>
-        <body><div class="container"><h1>${title}</h1><p class="message">${message}</p><br><a href="${linkHref}">${linkText}</a></div></body></html>`;
-    
-    return new Response(html, { status: isError ? 400 : 200, headers: HTML_HEADERS });
-}
-
-function renderLoginForm(req: Request): Response {
-    const url = new URL(req.url);
-    const error = url.searchParams.get("error");
-
+function renderLoginForm(): Response {
     const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Login</title><style>${globalStyles}</style></head>
-        <body><div class="container">
-            <h1>Welcome Back!</h1>
-            ${error === 'invalid' ? '<p class="error">Invalid username or password.</p>' : ''}
-            <form action="/auth" method="POST">
-                <label for="username">Name:</label><br>
-                <input type="text" id="username" name="username" required><br><br>
-                <label for="password">Password:</label><br>
-                <input type="password" id="password" name="password" required><br><br>
-                <button type="submit">Log In</button>
-            </form>
-            <p style="margin-top:20px; text-align:center;">Don't have an account? <a href="/register">Register Here</a></p>
-        </div></body></html>`;
+        <body><div class="container"><h1>User Login</h1><form action="/auth" method="POST">
+        <label for="username">Name:</label><br><input type="text" id="username" name="username" required><br><br>
+        <label for="password">Password:</label><br><input type="password" id="password" name="password" required><br><br>
+        <button type="submit">Log In</button></form>
+        <p style="margin-top:20px; text-align:center;">Don't have an account? <a href="/register">Register Here</a></p></div></body></html>`;
     return new Response(html, { headers: HTML_HEADERS });
 }
 
 function renderRegisterForm(req: Request): Response {
     const url = new URL(req.url);
     const error = url.searchParams.get("error");
-    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Register</title><style>${globalStyles} button.register{background-color:#34c759;}</style></head>
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Register</title><style>${globalStyles} button.register{background-color:#28a745;}</style></head>
         <body><div class="container"><h1>Create Account</h1>
         ${error === 'exists' ? '<p class="error">This username is already taken.</p>' : ''}
-        <form action="/doregister" method="POST"><label for="username">Choose Name:</label><br><input type="text" id="username" name="username" required><br><br><label for="password">Choose Password:</label><br><input type="password" id="password" name="password" required><br><br><button type="submit" class="register">Create Account</button></form>
+        <form action="/doregister" method="POST"><label for="username">Choose Name:</label><br><input type="text" id="username" name="username" required><br><br>
+        <label for="password">Choose Password:</label><br><input type="password" id="password" name="password" required><br><br>
+        <button type="submit" class="register">Create Account</button></form>
         <p style="margin-top:20px; text-align:center;">Already have an account? <a href="/login">Login</a></p></div></body></html>`;
     return new Response(html, { headers: HTML_HEADERS });
 }
 
 async function renderAdminPanel(token: string, message: string | null): Promise<Response> {
     let messageHtml = "";
-    if (message === "topup_success") messageHtml = `<div class="success">User balance updated!</div>`;
-    if (message === "product_added") messageHtml = `<div class="success">Product added!</div>`;
-    if (message === "product_updated") messageHtml = `<div class="success">Product updated!</div>`;
-    if (message === "product_deleted") messageHtml = `<div class="error" style="background-color:#ffebe9;">Product deleted!</div>`;
+    if (message === "topup_success") messageHtml = `<div class="success-msg">User balance updated!</div>`;
+    if (message === "product_added") messageHtml = `<div class="success-msg">Product added!</div>`;
+    if (message === "product_updated") messageHtml = `<div class="success-msg">Product updated!</div>`;
+    if (message === "product_deleted") messageHtml = `<div class="success-msg" style="background-color:#f8d7da; color:#721c24;">Product deleted!</div>`;
 
     const products = await getProducts();
     const productListHtml = products.map(p => `
@@ -220,8 +207,7 @@ async function renderAdminPanel(token: string, message: string | null): Promise<
             <div class="actions">
                 <a href="/admin/edit_product?token=${token}&id=${p.id}" class="edit-btn">Edit</a>
                 <form method="POST" action="/admin/delete_product" style="display:inline;" onsubmit="return confirm('Delete ${p.name}?');">
-                    <input type="hidden" name="token" value="${token}"><input type="hidden" name="productId" value="${p.id}">
-                    <button type="submit" class="delete-btn">Delete</button>
+                    <input type="hidden" name="token" value="${token}"><input type="hidden" name="productId" value="${p.id}"><button type="submit" class="delete-btn">Delete</button>
                 </form>
             </div>
         </div>
@@ -230,11 +216,11 @@ async function renderAdminPanel(token: string, message: string | null): Promise<
     const html = `
         <!DOCTYPE html><html lang="my"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Admin Panel</title>
         <style>${globalStyles}
-            button.admin{background-color:#34c759; width:100%;} button.product{background-color:#ff9500; color:white; width:100%;} hr{margin:30px 0; border:0; border-top:1px solid #e5e5e7;}
-            .success { padding: 10px; background-color: #e6f7eb; color: #34c759; border-radius: 5px; margin-bottom: 15px; }
+            button.admin{background-color:#28a745;} button.product{background-color:#ffc107; color:black;} hr{margin:30px 0; border:0; border-top:1px solid #eee;}
+            .success-msg { padding: 10px; background-color: #d4edda; color: #155724; border-radius: 5px; margin-bottom: 15px; }
             .product-item { display:flex; justify-content:space-between; align-items:center; padding:10px; border-bottom:1px solid #eee; }
-            .edit-btn { background-color:#007aff; color:white; padding:5px 10px; border-radius:4px; font-size: 0.9em; }
-            .delete-btn { background-color:#ff3b30; padding:5px 10px; font-size: 0.9em; }
+            .edit-btn { background-color:#007bff; color:white; padding:5px 10px; border-radius:4px; font-size: 14px; }
+            .delete-btn { background-color:#dc3545; padding:5px 10px; font-size: 14px; }
         </style></head>
         <body><div class="container">
             ${messageHtml}
@@ -249,7 +235,7 @@ async function renderAdminPanel(token: string, message: string | null): Promise<
 
 async function renderEditProductPage(token: string, product: Product): Promise<Response> {
     const html = `
-        <!DOCTYPE html><html lang="my"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Edit Product</title><style>${globalStyles} button.product{background-color:#ff9500; color:white; width:100%;}</style></head>
+        <!DOCTYPE html><html lang="my"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Edit Product</title><style>${globalStyles} button.product{background-color:#ffc107; color:black;}</style></head>
         <body><div class="container">
             <h1>Edit Product</h1>
             <form action="/admin/update_product" method="POST">
@@ -258,36 +244,38 @@ async function renderEditProductPage(token: string, product: Product): Promise<R
                 <label>Price (Ks):</label><input type="number" name="price" required value="${product.price}"><br><br>
                 <label>Image URL (or Emoji):</label><input type="url" name="imageUrl" required value="${product.imageUrl}"><br><br>
                 <button type="submit" class="product">Update Product</button>
-            </form><p style="text-align:center; margin-top:20px;"><a href="/admin/panel?token=${token}">Cancel</a></p>
+            </form><p style="text-align:center; margin-top:15px;"><a href="/admin/panel?token=${token}">Cancel</a></p>
         </div></body></html>`;
     return new Response(html, { headers: HTML_HEADERS });
 }
 
-// UPDATED: Dashboard now reads products from KV and formats numbers
-async function handleDashboard(req: Request, username: string): Promise<Response> {
+// UPDATED: Added <meta refresh> for auto-redirect on non-errors
+function renderMessagePage(title: string, message: string, isError = false, backLink: string | null = null): Response {
+    const borderColor = isError ? "#dc3545" : "#28a745";
+    const linkHref = backLink || "/dashboard";
+    const linkText = backLink === null ? "Back to Shop" : "Go Back";
+    // NEW: Auto-redirect to dashboard after 3 seconds on success
+    const metaRefresh = isError ? '' : `<meta http-equiv="refresh" content="3;url=${linkHref}">`;
+
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${title}</title>${metaRefresh}<meta name="viewport" content="width=device-width, initial-scale=1"><style>${globalStyles} .container{text-align:center; border-top:5px solid ${borderColor};} .message{font-size:1.2em; color:${isError ? '#dc3545' : '#333'};}</style></head>
+        <body><div class="container"><h1>${title}</h1><p class="message">${message}</p><br><a href="${linkHref}">${linkText}</a></div></body></html>`;
+    
+    return new Response(html, { status: isError ? 400 : 200, headers: HTML_HEADERS });
+}
+
+// UPDATED: New Dashboard UI
+async function handleDashboard(username: string): Promise<Response> {
     const user = await getUserByUsername(username);
     if (!user) return handleLogout(); 
     
-    // NEW: Check for success/error messages from URL
-    const url = new URL(req.url);
-    const message = url.searchParams.get("message");
-    let messageHtml = "";
-    if (message === "buy_success") {
-        messageHtml = `<div class="alert success">Purchase successful! Your balance has been updated.</div>`;
-    }
-    if (message === "buy_fail") {
-        messageHtml = `<div class="alert error">Purchase failed: Insufficient funds. Please contact admin.</div>`;
-    }
-
     const products = await getProducts();
     
+    // Dynamically create product cards
     const productListHtml = products.map(product => `
-        <div class="item-card">
-            <div class="item-info">
-                <h3>${product.imageUrl.startsWith('http') ? `<img src="${product.imageUrl}" alt="${product.name}" height="40" style="vertical-align:middle; margin-right:10px; border-radius: 5px;">` : product.imageUrl} ${product.name} 
-                    <span class="price">(${formatCurrency(product.price)} Ks)</span>
-                </h3>
-            </div>
+        <div class="product-card">
+            ${product.imageUrl.startsWith('http') ? `<img src="${product.imageUrl}" alt="${product.name}" class="product-image">` : `<div class="product-emoji">${product.imageUrl}</div>`}
+            <h3 class="product-name">${product.name}</h3>
+            <div class="product-price">${formatCurrency(product.price)} Ks</div>
             <form method="POST" action="/buy" onsubmit="return checkBalance('${product.name}', ${product.price}, ${user.balance});">
                 <input type="hidden" name="item" value="${product.name}"><input type="hidden" name="price" value="${product.price}">
                 <button type="submit" class="buy-btn">Buy Now</button>
@@ -296,27 +284,32 @@ async function handleDashboard(req: Request, username: string): Promise<Response
     `).join('');
     
     const html = `
-        <!DOCTYPE html><html lang="my"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Shop Dashboard</title>
+        <!DOCTYPE html><html lang="my"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Shop</title>
         <style>${globalStyles}
-            .balance-box{background-color:#e6f7ff; padding:15px 20px; border-radius:8px; margin-bottom:20px; border: 1px solid #bce6ff;} 
-            .balance-amount{font-size:2.2em; color:#007aff; font-weight:bold;} 
-            .item-card{border:1px solid #e5e5e7; padding:15px; margin-bottom:15px; border-radius:8px; display:flex; justify-content:space-between; align-items:center;} 
-            .item-info h3{margin-top:0; margin-bottom:0; color:#333; font-size:1.1em; display:flex; align-items:center;} 
-            .price{font-weight:bold; color:#555; margin-left:10px;} 
-            .buy-btn{background-color:#34c759; color:white; border:none; padding:10px 15px; border-radius:8px; cursor:pointer; font-weight:600;} 
-            .nav-links{display:flex; justify-content:space-between; margin-top:30px;}
-            .alert { padding: 15px; margin-bottom: 20px; border-radius: 8px; font-weight: 600; }
-            .alert.success { background-color: #e6f7eb; color: #34c759; border: 1px solid #c3e6cb; }
-            .alert.error { background-color: #ffebe9; color: #ff3b30; border: 1px solid #ffcdd2; }
+            .balance-box { background-color: #007bff; color: white; padding: 20px; border-radius: 12px; margin-bottom: 25px; text-align: center; }
+            .balance-label { font-size: 16px; opacity: 0.8; }
+            .balance-amount { font-size: 2.5em; font-weight: 700; }
+            .product-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 15px; }
+            .product-card { background: #fff; border: 1px solid #ddd; border-radius: 10px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); text-align: center; padding: 15px; }
+            .product-image { width: 100%; height: 100px; object-fit: cover; border-radius: 8px; }
+            .product-emoji { font-size: 60px; line-height: 100px; height: 100px; }
+            .product-name { font-size: 16px; font-weight: 600; color: #333; margin: 10px 0; }
+            .product-price { font-size: 14px; font-weight: 600; color: #28a745; margin-bottom: 15px; }
+            .buy-btn { background-color: #28a745; width: 100%; padding: 10px; font-size: 14px; }
+            .nav-links { display: flex; justify-content: space-between; margin-top: 25px; }
         </style>
         </head>
         <body><div class="container">
-            ${messageHtml}
             <h1>Welcome, ${user.username}!</h1>
-            <div class="balance-box"><span>Current Balance:</span><div class="balance-amount">${formatCurrency(user.balance)} Ks</div></div>
+            <div class="balance-box">
+                <div class="balance-label">Current Balance:</div>
+                <div class="balance-amount">${formatCurrency(user.balance)} Ks</div>
+            </div>
             <h2>🛒 Shop Items:</h2>
-            ${products.length > 0 ? productListHtml : '<p>No products available yet. Check back soon!</p>'}
-            <div class="nav-links"><a href="/user-info">My Info</a><a href="/logout" style="color:#ff3b30;">Logout</a></div>
+            <div class="product-grid">
+                ${products.length > 0 ? productListHtml : '<p>No products available yet.</p>'}
+            </div>
+            <div class="nav-links"><a href="/user-info">My Info</a><a href="/logout" style="color:red;">Logout</a></div>
         </div>
         <script>
             function checkBalance(itemName, price, balance) {
@@ -334,7 +327,7 @@ async function handleDashboard(req: Request, username: string): Promise<Response
     return new Response(html, { headers: HTML_HEADERS });
 }
 
-// ROUTE: /user-info (UPDATED with Timezone + Formatting + UI)
+// UPDATED: New UI
 async function handleUserInfoPage(username: string): Promise<Response> {
     const user = await getUserByUsername(username);
     if (!user) return handleLogout();
@@ -354,19 +347,20 @@ async function handleUserInfoPage(username: string): Promise<Response> {
 
     const html = `
         <!DOCTYPE html><html lang="my"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>My Info</title>
-        <style>${globalStyles} 
-            .info-item{font-size:1.2em; margin-bottom:10px; padding: 10px; background-color: #f8f8f8; border-radius: 5px;} 
-            .history{margin-top:20px;} 
-            ul{padding-left: 20px; list-style-type: none; margin: 0; padding: 0;}
-            li { background-color: #f8f8f8; padding: 10px; border-radius: 5px; margin-bottom: 8px; }
+        <style>${globalStyles}
+            .info-item { font-size: 1.2em; margin-bottom: 10px; padding: 10px; background: #f9f9f9; border-radius: 5px; }
+            .history { margin-top: 25px; }
+            .history h2 { border-bottom: 1px solid #eee; padding-bottom: 5px; }
+            .history ul { padding-left: 20px; list-style-type: disc; }
+            .history li { margin-bottom: 8px; }
         </style></head>
         <body><div class="container"><h1>My User Info</h1>
         <div class="info-item"><strong>Username:</strong> ${user.username}</div>
         <div class="info-item"><strong>Balance:</strong> ${formatCurrency(user.balance)} Ks</div>
-        <p style="font-size:0.9em; color:gray;">(For security, passwords are never shown.)</p>
+        <p style="font-size:0.9em; color:gray; text-align: center;">(For security, passwords are never shown.)</p>
         <div class="history"><h2>Top-Up History</h2>${topUpHistory.length > 0 ? `<ul>${topUpHistory}</ul>` : '<p>You have not received any top-ups yet.</p>'}</div>
         <div class="history"><h2>Purchase History</h2>${purchaseHistory.length > 0 ? `<ul>${purchaseHistory}</ul>` : '<p>You have not made any purchases yet.</p>'}</div>
-        <a href="/dashboard" style="display:inline-block; margin-top:20px;">Back to Shop</a></div></body></html>`;
+        <a href="/dashboard" style="display:block; text-align:center; margin-top:20px;">Back to Shop</a></div></body></html>`;
     return new Response(html, { headers: HTML_HEADERS });
 }
 
@@ -375,25 +369,19 @@ async function handleUserInfoPage(username: string): Promise<Response> {
 // Action Handlers (Processing POST requests)
 // ----------------------------------------------------
 
-async function handleAuth(req: Request): Promise<Response> {
-    const formData = await req.formData();
+async function handleAuth(formData: FormData): Promise<Response> {
     const username = formData.get("username")?.toString();
     const password = formData.get("password")?.toString();
 
-    if (!username || !password) return renderLoginForm(req); // Show login form with error
+    if (!username || !password) return renderMessagePage("Login Failed", "Missing username or password.", true, "/login");
     const user = await getUserByUsername(username);
-    if (!user || !verifyPassword(password, user.passwordHash)) {
-         const headers = new Headers();
-         headers.set("Location", "/login?error=invalid");
-         return new Response("Redirecting...", { status: 302, headers });
-    }
+    if (!user || !verifyPassword(password, user.passwordHash)) return renderMessagePage("Login Failed", "Invalid username or password.", true, "/login");
     
     const headers = createSession(username); 
     return new Response("Login successful. Redirecting...", { status: 302, headers });
 }
 
-async function handleRegister(req: Request): Promise<Response> {
-    const formData = await req.formData();
+async function handleRegister(formData: FormData): Promise<Response> {
     const username = formData.get("username")?.toString();
     const password = formData.get("password")?.toString();
 
@@ -412,30 +400,28 @@ async function handleRegister(req: Request): Promise<Response> {
     }
 }
 
-// UPDATED: handleBuy now redirects back to dashboard with a message
-async function handleBuy(req: Request, username: string): Promise<Response> {
-    const formData = await req.formData();
+// UPDATED: handleBuy now passes itemName to logTransaction
+async function handleBuy(formData: FormData, username: string): Promise<Response> {
     const item = formData.get("item")?.toString();
     const priceStr = formData.get("price")?.toString();
     const price = priceStr ? parseInt(priceStr) : NaN;
 
     if (!item || isNaN(price) || price <= 0) {
-        const headers = new Headers();
-        headers.set("Location", "/dashboard?message=buy_fail");
-        return new Response("Redirecting...", { status: 302, headers });
+        return renderMessagePage("Error", "Invalid item or price.", true);
     }
 
-    // Server-side balance check (final security)
     const success = await updateUserBalance(username, -price); 
 
-    const headers = new Headers();
     if (success) {
-        await logTransaction(username, -price, "purchase", item); // Pass item name
-        headers.set("Location", "/dashboard?message=buy_success");
+        await logTransaction(username, -price, "purchase", item); // Pass item name here
+        const newBalance = (await getUserByUsername(username))?.balance ?? 0;
+        const message = `You bought <strong>${item}</strong> for ${formatCurrency(price)} Ks.<br>Your new balance is <strong>${formatCurrency(newBalance)} Ks</strong>.`;
+        return renderMessagePage("Purchase Successful!", message, false);
     } else {
-        headers.set("Location", "/dashboard?message=buy_fail");
+        const user = await getUserByUsername(username);
+        const message = `You have ${formatCurrency(user?.balance ?? 0)} Ks but need ${formatCurrency(price)} Ks. Please contact admin for a top-up.`;
+        return renderMessagePage("Insufficient Balance", message, true);
     }
-    return new Response("Redirecting...", { status: 302, headers });
 }
 
 async function handleAdminTopUp(formData: FormData): Promise<Response> {
@@ -452,7 +438,7 @@ async function handleAdminTopUp(formData: FormData): Promise<Response> {
     const success = await updateUserBalance(username, amount);
 
     if (success) {
-        await logTransaction(username, amount, "topup"); 
+        await logTransaction(username, amount, "topup"); // No item name
         const headers = new Headers();
         headers.set("Location", `/admin/panel?token=${token}&message=topup_success`);
         return new Response("Redirecting...", { status: 302, headers });
@@ -525,20 +511,20 @@ function handleLogout(): Response {
 }
 
 // ----------------------------------------------------
-// Main Server Router (FINALIZED)
+// Main Server Router (RE-WRITTEN FOR STABILITY)
 // ----------------------------------------------------
 
 async function handler(req: Request): Promise<Response> {
     const url = new URL(req.url);
     const pathname = url.pathname;
     
-    // --- Public GET Routes ---
+    // --- Handle GET requests ---
     if (req.method === "GET") {
-        if (pathname === "/login") return renderLoginForm(req);
+        if (pathname === "/login") return renderLoginForm();
         if (pathname === "/register") return renderRegisterForm(req);
         if (pathname === "/logout") return handleLogout();
 
-        // --- Admin GET Routes ---
+        // Admin GET
         const token = url.searchParams.get("token");
         if (pathname === "/admin/panel") {
             if (token !== ADMIN_TOKEN) return renderMessagePage("Error", "Unauthorized.", true);
@@ -554,42 +540,39 @@ async function handler(req: Request): Promise<Response> {
             return await renderEditProductPage(token, product);
         }
 
-        // --- Protected User GET Routes ---
+        // User GET (Protected)
         const username = getUsernameFromCookie(req);
-        if (pathname === "/dashboard") {
-            if (!username) return handleLogout();
-            return await handleDashboard(req, username); // Pass req to read URL messages
-        }
-        if (pathname === "/user-info") {
-            if (!username) return handleLogout();
-            return await handleUserInfoPage(username);
-        }
+        if (!username) return handleLogout(); // If no cookie, redirect to login
+        
+        if (pathname === "/dashboard") return await handleDashboard(username);
+        if (pathname === "/user-info") return await handleUserInfoPage(username);
     }
     
-    // --- POST Routes ---
+    // --- Handle POST requests ---
     if (req.method === "POST") {
-        // User POST (does not need token)
-        if (pathname === "/auth") return handleAuth(req);
-        if (pathname === "/doregister") return handleRegister(req);
-        
-        // --- User 'Buy' POST (needs session) ---
+        const formData = await req.formData(); // Read form data ONCE
+
+        // Public POST
+        if (pathname === "/auth") return await handleAuth(formData);
+        if (pathname === "/doregister") return await handleRegister(formData);
+
+        // User 'Buy' POST (Protected)
         if (pathname === "/buy") {
             const username = getUsernameFromCookie(req);
-            if (!username) return handleLogout();
-            return handleBuy(req, username); 
+            if (!username) return handleLogout(); // Must be logged in
+            return await handleBuy(formData, username);
         }
 
-        // --- Admin POST (requires token) ---
-        const formData = await req.formData();
+        // Admin POST (Protected)
         const token = formData.get("token")?.toString();
         if (token !== ADMIN_TOKEN) {
             return renderMessagePage("Error", "Unauthorized: Invalid Token.", true);
         }
 
-        if (pathname === "/admin/topup") return handleAdminTopUp(formData);
-        if (pathname === "/admin/add_product") return handleAddProduct(formData);
-        if (pathname === "/admin/update_product") return handleUpdateProduct(formData);
-        if (pathname === "/admin/delete_product") return handleDeleteProduct(formData);
+        if (pathname === "/admin/topup") return await handleAdminTopUp(formData);
+        if (pathname === "/admin/add_product") return await handleAddProduct(formData);
+        if (pathname === "/admin/update_product") return await handleUpdateProduct(formData);
+        if (pathname === "/admin/delete_product") return await handleDeleteProduct(formData);
     }
 
     // --- Default Route (Redirect all other requests to login) ---
