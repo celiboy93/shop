@@ -29,7 +29,6 @@ interface Product {
 // Core Helper Functions
 // ----------------------------------------------------
 
-// Helper to format numbers with commas
 function formatCurrency(amount: number): string {
     return amount.toLocaleString('en-US');
 }
@@ -64,11 +63,10 @@ async function updateUserBalance(username: string, amountChange: number): Promis
     }
 }
 
-// UPDATED: logTransaction now accepts itemName
 async function logTransaction(username: string, amount: number, type: "topup" | "purchase", itemName?: string): Promise<void> {
     const timestamp = new Date().toISOString(); 
     const key = ["transactions", username, timestamp]; 
-    const transaction: Transaction = { type, amount, timestamp, itemName }; // Save itemName
+    const transaction: Transaction = { type, amount, timestamp, itemName }; 
     await kv.set(key, transaction);
 }
 
@@ -150,7 +148,6 @@ function createSession(username: string): Headers {
 
 const HTML_HEADERS = { "Content-Type": "text/html; charset=utf-8" };
 
-// NEW: Modern UI Global Styles
 const globalStyles = `
     body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; margin: 0; padding: 20px; background-color: #f0f2f5; display: flex; justify-content: center; align-items: center; min-height: 90vh; }
     .container { max-width: 500px; width: 100%; padding: 30px; background-color: #ffffff; border-radius: 12px; box-shadow: 0 6px 16px rgba(0,0,0,0.1); }
@@ -254,7 +251,7 @@ function renderMessagePage(title: string, message: string, isError = false, back
     const borderColor = isError ? "#dc3545" : "#28a745";
     const linkHref = backLink || "/dashboard";
     const linkText = backLink === null ? "Back to Shop" : "Go Back";
-    // NEW: Auto-redirect to dashboard after 3 seconds on success
+    // Auto-redirect to dashboard after 3 seconds on success
     const metaRefresh = isError ? '' : `<meta http-equiv="refresh" content="3;url=${linkHref}">`;
 
     const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>${title}</title>${metaRefresh}<meta name="viewport" content="width=device-width, initial-scale=1"><style>${globalStyles} .container{text-align:center; border-top:5px solid ${borderColor};} .message{font-size:1.2em; color:${isError ? '#dc3545' : '#333'};}</style></head>
@@ -263,14 +260,12 @@ function renderMessagePage(title: string, message: string, isError = false, back
     return new Response(html, { status: isError ? 400 : 200, headers: HTML_HEADERS });
 }
 
-// UPDATED: New Dashboard UI
 async function handleDashboard(username: string): Promise<Response> {
     const user = await getUserByUsername(username);
     if (!user) return handleLogout(); 
     
     const products = await getProducts();
     
-    // Dynamically create product cards
     const productListHtml = products.map(product => `
         <div class="product-card">
             ${product.imageUrl.startsWith('http') ? `<img src="${product.imageUrl}" alt="${product.name}" class="product-image">` : `<div class="product-emoji">${product.imageUrl}</div>`}
@@ -327,7 +322,7 @@ async function handleDashboard(username: string): Promise<Response> {
     return new Response(html, { headers: HTML_HEADERS });
 }
 
-// UPDATED: New UI
+// UPDATED: New UI for User Info
 async function handleUserInfoPage(username: string): Promise<Response> {
     const user = await getUserByUsername(username);
     if (!user) return handleLogout();
@@ -343,20 +338,26 @@ async function handleUserInfoPage(username: string): Promise<Response> {
         .map(t => `<li>On ${toMyanmarTime(t.timestamp)}, you received <strong>${formatCurrency(t.amount)} Ks</strong>.</li>`).join('');
     
     const purchaseHistory = transactions.filter(t => t.type === 'purchase')
-        .map(t => `<li>On ${toMyanmarTime(t.timestamp)}, you bought <strong>${t.itemName || 'an item'}</strong> for <strong>${formatCurrency(Math.abs(t.amount))} Ks</strong>.</li>`).join('');
+        .map(t => `<li>On ${toMyanmarTime(t.timestamp)}, you bought <strong>${t.itemName || 'an item'}</strong> for <strong>${formatCurrency(Math.abs(t.amount))} Ks</strong>.</li>`)
+        .join('');
 
     const html = `
         <!DOCTYPE html><html lang="my"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>My Info</title>
         <style>${globalStyles}
-            .info-item { font-size: 1.2em; margin-bottom: 10px; padding: 10px; background: #f9f9f9; border-radius: 5px; }
+            .info-card { background: #f9f9f9; border-radius: 8px; padding: 15px; margin-bottom: 20px; }
+            .info-item { font-size: 1.1em; margin-bottom: 10px; display: flex; justify-content: space-between; }
+            .info-item strong { color: #333; }
+            .info-item span { color: #555; }
             .history { margin-top: 25px; }
             .history h2 { border-bottom: 1px solid #eee; padding-bottom: 5px; }
-            .history ul { padding-left: 20px; list-style-type: disc; }
-            .history li { margin-bottom: 8px; }
+            .history ul { padding-left: 20px; list-style-type: none; }
+            .history li { margin-bottom: 10px; padding: 8px; background: #fdfdfd; border: 1px solid #eee; border-radius: 5px; }
         </style></head>
         <body><div class="container"><h1>My User Info</h1>
-        <div class="info-item"><strong>Username:</strong> ${user.username}</div>
-        <div class="info-item"><strong>Balance:</strong> ${formatCurrency(user.balance)} Ks</div>
+        <div class="info-card">
+            <div class="info-item"><strong>Username:</strong> <span>${user.username}</span></div>
+            <div class="info-item"><strong>Balance:</strong> <span style="color:#007bff; font-weight:bold;">${formatCurrency(user.balance)} Ks</span></div>
+        </div>
         <p style="font-size:0.9em; color:gray; text-align: center;">(For security, passwords are never shown.)</p>
         <div class="history"><h2>Top-Up History</h2>${topUpHistory.length > 0 ? `<ul>${topUpHistory}</ul>` : '<p>You have not received any top-ups yet.</p>'}</div>
         <div class="history"><h2>Purchase History</h2>${purchaseHistory.length > 0 ? `<ul>${purchaseHistory}</ul>` : '<p>You have not made any purchases yet.</p>'}</div>
