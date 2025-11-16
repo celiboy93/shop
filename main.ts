@@ -11,19 +11,18 @@ interface User {
     username: string;
     passwordHash: string;
     balance: number;
-    isBlocked: boolean; // NEW: For blocking users
 }
 interface Transaction {
     type: "topup" | "purchase";
     amount: number;
-    timestamp: string; 
-    itemName?: string; 
+    timestamp: string; // Stored in UTC
+    itemName?: string; // Store the item name for purchases
 }
 interface Product {
     id: string; 
     name: string; 
     price: number; 
-    salePrice?: number | null;
+    salePrice?: number | null; // NEW: For Flash Sales
     imageUrl: string; 
 }
 interface Voucher {
@@ -55,12 +54,7 @@ async function getUserByUsername(username: string): Promise<User | null> {
 }
 
 async function registerUser(username: string, passwordHash: string): Promise<boolean> {
-    const user: User = { 
-        username, 
-        passwordHash, 
-        balance: 0, 
-        isBlocked: false // NEW: Default to not blocked
-    };
+    const user: User = { username, passwordHash, balance: 0 };
     const key = ["users", username];
     const res = await kv.atomic().check({ key, versionstamp: null }).set(key, user).commit();
     return res.ok;
@@ -89,26 +83,6 @@ async function resetUserPassword(username: string, newPasswordHash: string): Pro
     return res.ok;
 }
 
-// NEW: Function to toggle a user's blocked status
-async function toggleBlockUser(username: string): Promise<string> {
-    const key = ["users", username];
-    const result = await kv.get<User>(key);
-    const user = result.value;
-
-    if (!user) return "User not found.";
-    
-    const newStatus = !user.isBlocked; // Flip the status
-    user.isBlocked = newStatus;
-    
-    const res = await kv.atomic().check(result).set(key, user).commit();
-    
-    if (res.ok) {
-        return newStatus ? "User has been BLOCKED." : "User has been UNBLOCKED.";
-    }
-    return "Failed to update user status.";
-}
-
-
 async function transferBalance(senderUsername: string, recipientUsername: string, amount: number): Promise<string> {
     if (senderUsername === recipientUsername) return "Cannot send money to yourself.";
     if (amount <= 0) return "Amount must be positive.";
@@ -124,9 +98,6 @@ async function transferBalance(senderUsername: string, recipientUsername: string
 
         const sender = senderResult.value;
         const recipient = recipientResult.value;
-
-        if (sender.isBlocked) return "Sender account is suspended."; // Check if sender is blocked
-        if (recipient.isBlocked) return "Recipient account is suspended."; // Check if recipient is blocked
 
         if (sender.balance < amount) {
             return `Insufficient balance. You only have ${formatCurrency(sender.balance)} Ks.`;
@@ -303,7 +274,6 @@ function renderLoginForm(req: Request): Response {
     let errorHtml = "";
     if (error === 'invalid') errorHtml = '<p class="error">Invalid username or password. Please try again.</p>';
     if (error === 'missing') errorHtml = '<p class="error">Please enter both username and password.</p>';
-    if (error === 'blocked') errorHtml = '<p class="error">Your account has been suspended by the admin.</p>'; // NEW
 
     const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Login</title><style>${globalStyles}</style></head>
         <body><div class="container"><h1>User Login</h1>${errorHtml} 
@@ -331,7 +301,6 @@ function renderRegisterForm(req: Request): Response {
     return new Response(html, { headers: HTML_HEADERS });
 }
 
-// UPDATED: Admin Panel now includes User Management
 async function renderAdminPanel(token: string, message: string | null): Promise<Response> {
     let messageHtml = "";
     if (message) messageHtml = `<div class="success-msg">${decodeURIComponent(message)}</div>`;
@@ -388,13 +357,10 @@ async function renderAdminPanel(token: string, message: string | null): Promise<
                 <label>Full Price (Ks):</label><input type="number" name="price" required><br><br>
                 <label>Sale Price (Ks) (Optional):</label><input type="number" name="sale_price" placeholder="Leave empty for no sale"><br><br>
                 <button type="submit" class="product">Add Product</button></form><hr>
-            
-            <h2>User Management</h2>
-            <form action="/admin/topup" method="POST"><input type="hidden" name="token" value="${token}"><label>User Name (for Top-Up):</label><input type="text" name="name" required><br><br><label>Amount (Ks):</label><input type="number" name="amount" required><br><br><button type="submit" class="admin">Add Balance</button></form>
-            <br>
-            <form action="/admin/reset_password" method="POST"><input type="hidden" name="token" value="${token}"><label>User Name (for Reset):</label><input type="text" name="name" required><br><br><label>New Password:</label><input type="text" name="new_password" required><br><br><button type="submit" class="reset">Reset Password</button></form>
-            <br>
-            <form action="/admin/toggle_block" method="POST"><input type="hidden" name="token" value="${token}"><label>User Name (to Block/Unblock):</label><input type="text" name="name" required><br><br><button type="submit" style="background-color:#555;">Toggle Block Status</button></form>
+            <h2>User Top-Up</h2>
+            <form action="/admin/topup" method="POST"><input type="hidden" name="token" value="${token}"><label>User Name:</label><input type="text" name="name" required><br><br><label>Amount (Ks):</label><input type="number" name="amount" required><br><br><button type="submit" class="admin">Add Balance</button></form><hr>
+            <h2>Reset User Password</h2>
+            <form action="/admin/reset_password" method="POST"><input type="hidden" name="token" value="${token}"><label>User Name:</label><input type="text" name="name" required><br><br><label>New Password:</label><input type="text" name="new_password" required><br><br><button type="submit" class="reset">Reset Password</button></form>
         </div></body></html>`;
     return new Response(html, { headers: HTML_HEADERS });
 }
@@ -519,7 +485,9 @@ async function handleDashboard(username: string): Promise<Response> {
     return new Response(html, { headers: HTML_HEADERS });
 }
 
-// UPDATED: User Info UI (Alignment, Scroll, Inline Redeem, How to Top Up)
+// ----------------------------------------------------
+// (!!!!) USER INFO FUNCTION - UI UPDATED (!!!!)
+// ----------------------------------------------------
 async function handleUserInfoPage(req: Request, username: string): Promise<Response> {
     const user = await getUserByUsername(username);
     if (!user) return handleLogout();
@@ -534,7 +502,7 @@ async function handleUserInfoPage(req: Request, username: string): Promise<Respo
 
     let messageHtml = "";
     if (message === "redeem_success") messageHtml = `<div class="success-msg">Success! ${formatCurrency(parseInt(value || "0"))} Ks was added to your balance.</div>`;
-    if (message === "transfer_success") messageHtml = `<div class"success-msg">Success! You sent ${formatCurrency(parseInt(value || "0"))} Ks to ${recipient}.</div>`;
+    if (message === "transfer_success") messageHtml = `<div class="success-msg">Success! You sent ${formatCurrency(parseInt(value || "0"))} Ks to ${recipient}.</div>`;
     if (error) messageHtml = `<div class="error" style="margin-top: 15px;">${decodeURIComponent(error)}</div>`;
 
     function toMyanmarTime(utcString: string): string {
@@ -557,7 +525,11 @@ async function handleUserInfoPage(req: Request, username: string): Promise<Respo
             .avatar { width: 60px; height: 60px; border-radius: 50%; background-color: #eee; margin-right: 15px; display: flex; justify-content: center; align-items: center; overflow: hidden; }
             .avatar svg { width: 32px; height: 32px; color: #aaa; }
             .profile-info { flex-grow: 1; }
-            .profile-name { font-size: 1.8em; font-weight: 600; color: #333; margin: 0; }
+            /* FIXED: Alignment */
+            .profile-grid { display: grid; grid-template-columns: 90px auto; align-items: center; } 
+            .profile-label { font-size: 1.2em; font-weight: 600; color: #333; }
+            .profile-name { font-size: 1.2em; color: #555; }
+            .profile-balance { font-size: 1.2em; color: #007bff; font-weight: 700; }
             
             /* Form Box */
             .form-box { margin-bottom: 25px; background: #f9f9f9; padding: 20px; border-radius: 8px; }
@@ -580,7 +552,8 @@ async function handleUserInfoPage(req: Request, username: string): Promise<Respo
             .payment-info { background: #fffbe6; border: 1px solid #ffeeba; border-radius: 8px; padding: 20px; }
             .payment-info h2 { margin-top: 0; }
             .payment-list { padding-left: 0; list-style: none; margin-top: 15px; }
-            .payment-account { display: grid; grid-template-columns: 100px auto; /* FIXED: 100px label */ align-items: center; margin-bottom: 12px; font-size: 1.1em; }
+            /* FIXED: Alignment for Payment */
+            .payment-account { display: grid; grid-template-columns: 100px auto; align-items: center; margin-bottom: 12px; font-size: 1.1em; }
             .payment-account strong { font-weight: 600; color: #333; }
             .payment-account .details { display: flex; flex-direction: column; }
             .payment-account .number { font-weight: 600; color: #0056b3; }
@@ -597,15 +570,17 @@ async function handleUserInfoPage(req: Request, username: string): Promise<Respo
                 </svg>
             </div>
             <div class="profile-info">
-                <h1 class="profile-name">${user.username}</h1>
+                <div class="profile-grid">
+                    <span class="profile-label">Username:</span> <span class="profile-name">${user.username}</span>
+                </div>
             </div>
         </div>
         
         ${messageHtml} <div class="form-box payment-info">
             <h2>How to Top Up</h2>
-            <p style="margin-top:0; color:#555;">Please transfer to one of the accounts below and redeem the voucher code provided by admin.</p>
+            <p style="margin-top:0; color:#555;">Contact admin via Telegram to buy Voucher Codes.</p>
             <div class="payment-list">
-                <a href="https_//t.me/iqowoq" target="_blank" class="telegram-link">
+                <a href="https://t.me/iqowoq" target="_blank" class="telegram-link">
                     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor"><path d="M19.467 1.817a1.68 1.68 0 0 0-1.57-.002L3.58 6.471A1.68 1.68 0 0 0 2.21 7.91v1.314a1.68 1.68 0 0 0 .58 1.258l5.96 4.708a.75.75 0 0 1 .31.623v5.04a.75.75 0 0 0 1.25.59L12 19.333l3.22 2.451a.75.75 0 0 0 1.25-.59v-5.04a.75.75 0 0 1 .31-.623l5.96-4.708a1.68 1.68 0 0 0 .58-1.258V7.91a1.68 1.68 0 0 0-1.37-1.443L19.467 1.817Z" /></svg>
                     <span>@iqowoq</span>
                 </a>
@@ -681,8 +656,8 @@ async function handleAuth(formData: FormData): Promise<Response> {
         headers.set("Location", "/login?error=invalid");
         return new Response("Redirecting...", { status: 302, headers });
     }
-
-    // NEW: Check if user is blocked
+    
+    // Check if user is blocked
     if (user.isBlocked) {
         const headers = new Headers();
         headers.set("Location", "/login?error=blocked");
@@ -973,6 +948,20 @@ function handleLogout(): Response {
 // Main Server Router (RE-WRITTEN FOR STABILITY)
 // ----------------------------------------------------
 
+// NEW: Helper to check auth status and block
+async function authenticateUser(req: Request): Promise<User | null> {
+    const username = getUsernameFromCookie(req);
+    if (!username) return null;
+
+    const user = await getUserByUsername(username);
+    if (!user) return null;
+
+    if (user.isBlocked) return null; // Treat blocked as not logged in
+
+    return user;
+}
+
+
 async function handler(req: Request): Promise<Response> {
     const url = new URL(req.url);
     const pathname = url.pathname;
@@ -1000,14 +989,14 @@ async function handler(req: Request): Promise<Response> {
         }
 
         // User GET (Protected)
-        const username = getUsernameFromCookie(req);
-        if (!username) {
+        const user = await authenticateUser(req);
+        if (!user) {
             if(pathname === "/" || pathname === "/dashboard" || pathname === "/user-info") {
                 return handleLogout(); // Redirect to login
             }
         } else {
-             if (pathname === "/" || pathname === "/dashboard") return await handleDashboard(username);
-             if (pathname === "/user-info") return await handleUserInfoPage(req, username); // Pass req
+             if (pathname === "/" || pathname === "/dashboard") return await handleDashboard(user);
+             if (pathname === "/user-info") return await handleUserInfoPage(req, user);
         }
     }
     
@@ -1020,11 +1009,11 @@ async function handler(req: Request): Promise<Response> {
         if (pathname === "/doregister") return await handleRegister(formData);
 
         // User 'Buy' & 'Redeem' POST (Protected)
-        const username = getUsernameFromCookie(req);
-        if (username) {
-            if (pathname === "/buy") return await handleBuy(formData, username);
-            if (pathname === "/redeem_voucher") return await handleRedeemVoucher(formData, username); 
-            if (pathname === "/transfer_funds") return await handleTransfer(formData, username); 
+        const user = await authenticateUser(req);
+        if (user) {
+            if (pathname === "/buy") return await handleBuy(formData, user.username);
+            if (pathname === "/redeem_voucher") return await handleRedeemVoucher(formData, user.username); 
+            if (pathname === "/transfer_funds") return await handleTransfer(formData, user.username); 
         } else if (pathname === "/buy" || pathname === "/redeem_voucher" || pathname === "/transfer_funds") {
             return handleLogout(); // Not logged in, redirect
         }
