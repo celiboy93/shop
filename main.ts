@@ -4,7 +4,6 @@ const kv = await Deno.openKv();
 // --- Configuration and Security ---
 const ADMIN_TOKEN = Deno.env.get("ADMIN_TOKEN") || "hardcoded_admin_pass"; 
 const SESSION_COOKIE_NAME = "session_id";
-// NEW: Define Myanmar Timezone
 const MYANMAR_TIMEZONE = "Asia/Yangon";
 
 // --- Data Structures ---
@@ -17,6 +16,13 @@ interface Transaction {
     type: "topup" | "purchase";
     amount: number;
     timestamp: string; // Stored in UTC
+}
+// NEW: Structure for dynamic products
+interface Product {
+    id: string; // e.g., "1678886400000"
+    name: string; // e.g., "☕ Coffee"
+    price: number; // e.g., 2000
+    imageUrl: string; // e.g., "https://.../coffee.jpg" or emoji
 }
 
 // ----------------------------------------------------
@@ -38,7 +44,6 @@ async function registerUser(username: string, passwordHash: string): Promise<boo
 
 async function updateUserBalance(username: string, amountChange: number): Promise<boolean> {
     const key = ["users", username];
-    
     while (true) {
         const result = await kv.get<User>(key);
         const user = result.value;
@@ -64,6 +69,25 @@ async function getTransactions(username: string): Promise<Transaction[]> {
         transactions.push(entry.value);
     }
     return transactions;
+}
+
+// NEW: Function to get all products
+async function getProducts(): Promise<Product[]> {
+    const entries = kv.list<Product>({ prefix: ["products"] });
+    const products: Product[] = [];
+    for await (const entry of entries) {
+        products.push(entry.value);
+    }
+    return products.sort((a, b) => parseInt(a.id) - parseInt(b.id)); // Sort by time added
+}
+
+// NEW: Function to add a product
+async function addProduct(name: string, price: number, imageUrl: string): Promise<boolean> {
+    const id = Date.now().toString(); // Use timestamp as simple ID
+    const product: Product = { id, name, price, imageUrl };
+    const key = ["products", id];
+    const res = await kv.set(key, product);
+    return res.ok;
 }
 
 // ----------------------------------------------------
@@ -97,32 +121,21 @@ function createSession(username: string): Headers {
 // HTML Render Functions (Pages)
 // ----------------------------------------------------
 
-// NEW: Helper function for consistent container styling
 const globalStyles = `
     body { font-family: sans-serif; margin: 0; padding: 0; background-color: #f4f7f6; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
     .container { max-width: 600px; width: 90%; margin: 30px auto; padding: 30px; background-color: white; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
-    h1 { color: #333; }
+    h1 { color: #333; } h2 { border-bottom: 1px solid #eee; padding-bottom: 5px; }
     a { color: #007bff; text-decoration: none; }
     button { background-color: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 5px; cursor: pointer; }
     .error { color: red; }
+    input[type="text"], input[type="password"], input[type="number"], input[type="url"] { width: 90%; padding: 10px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px; }
 `;
 
 function renderLoginForm(): Response {
     const html = `
-        <!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>Login</title><style>${globalStyles} input{width: 90%; padding: 10px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px;}</style></head>
-        <body>
-            <div class="container">
-                <h1>User Login</h1>
-                <form action="/auth" method="POST">
-                    <label for="username">Name:</label><br>
-                    <input type="text" id="username" name="username" required><br><br>
-                    <label for="password">Password:</label><br>
-                    <input type="password" id="password" name="password" required><br><br>
-                    <button type="submit">Log In</button>
-                </form>
-                <p style="margin-top:20px;">Don't have an account? <a href="/register">Register Here</a></p>
-            </div>
-        </body></html>`;
+        <!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>Login</title><style>${globalStyles}</style></head>
+        <body><div class="container"><h1>User Login</h1><form action="/auth" method="POST"><label for="username">Name:</label><br><input type="text" id="username" name="username" required><br><br><label for="password">Password:</label><br><input type="password" id="password" name="password" required><br><br><button type="submit">Log In</button></form>
+        <p style="margin-top:20px;">Don't have an account? <a href="/register">Register Here</a></p></div></body></html>`;
     return new Response(html, { headers: { "Content-Type": "text/html" } });
 }
 
@@ -130,30 +143,21 @@ function renderRegisterForm(req: Request): Response {
     const url = new URL(req.url);
     const error = url.searchParams.get("error");
     const html = `
-        <!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>Register</title><style>${globalStyles} input{width: 90%; padding: 10px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px;} button.register{background-color:#28a745;}</style></head>
-        <body>
-            <div class="container">
-                <h1>Create Account</h1>
-                ${error === 'exists' ? '<p class="error">This username is already taken. Please choose another one.</p>' : ''}
-                <form action="/doregister" method="POST">
-                    <label for="username">Choose Name:</label><br>
-                    <input type="text" id="username" name="username" required><br><br>
-                    <label for="password">Choose Password:</label><br>
-                    <input type="password" id="password" name="password" required><br><br>
-                    <button type="submit" class="register">Create Account</button>
-                </form>
-                <p style="margin-top:20px;">Already have an account? <a href="/login">Login</a></p>
-            </div>
-        </body></html>`;
+        <!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>Register</title><style>${globalStyles} button.register{background-color:#28a745;}</style></head>
+        <body><div class="container"><h1>Create Account</h1>
+        ${error === 'exists' ? '<p class="error">This username is already taken.</p>' : ''}
+        <form action="/doregister" method="POST"><label for="username">Choose Name:</label><br><input type="text" id="username" name="username" required><br><br><label for="password">Choose Password:</label><br><input type="password" id="password" name="password" required><br><br><button type="submit" class="register">Create Account</button></form>
+        <p style="margin-top:20px;">Already have an account? <a href="/login">Login</a></p></div></body></html>`;
     return new Response(html, { headers: { "Content-Type": "text/html" } });
 }
 
+// UPDATED: Admin Panel now has TWO forms
 function renderAdminPanel(token: string): Response {
     const html = `
-        <!DOCTYPE html><html lang="my"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Admin Top-Up Panel</title><style>${globalStyles} input{width: 90%; padding: 10px; margin-top: 5px; border: 1px solid #ccc; border-radius: 4px;} button.admin{background-color:#28a745; width: 100%;}</style></head>
+        <!DOCTYPE html><html lang="my"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Admin Panel</title><style>${globalStyles} button.admin{background-color:#28a745; width: 100%;} button.product{background-color:#ffc107; color:black; width:100%;} hr{margin: 30px 0;}</style></head>
         <body>
             <div class="container">
-                <h1>Admin Top-Up</h1>
+                <h2>User Top-Up</h2>
                 <form action="/admin/topup" method="POST">
                     <input type="hidden" name="token" value="${token}">
                     <label for="username">User Name:</label>
@@ -162,75 +166,81 @@ function renderAdminPanel(token: string): Response {
                     <input type="number" id="amount" name="amount" required placeholder="e.g., 2000"><br><br>
                     <button type="submit" class="admin">Add Balance</button>
                 </form>
+                
+                <hr>
+                
+                <h2>Add New Product</h2>
+                <form action="/admin/add_product" method="POST">
+                    <input type="hidden" name="token" value="${token}">
+                    <label for="productName">Product Name:</label>
+                    <input type="text" id="productName" name="name" required placeholder="e.g., ☕ Coffee"><br><br>
+                    <label for="productPrice">Price (Ks):</label>
+                    <input type="number" id="productPrice" name="price" required placeholder="e.g., 2000"><br><br>
+                    <label for="imageUrl">Image URL (or Emoji):</label>
+                    <input type="url" id="imageUrl" name="imageUrl" required placeholder="https://.../image.jpg (or paste ☕)"><br><br>
+                    <button type="submit" class="product">Add Product</button>
+                </form>
             </div>
         </body></html>`;
     return new Response(html, { headers: { "Content-Type": "text/html" } });
 }
 
+// Helper to render styled message pages
+function renderMessagePage(title: string, message: string, isError = false): Response {
+    const borderColor = isError ? "#dc3545" : "#28a745";
+    const html = `
+        <!DOCTYPE html><html><head><title>${title}</title><meta name="viewport" content="width=device-width, initial-scale=1"><style>${globalStyles} .container{text-align:center; border-top:5px solid ${borderColor};} .message{font-size:1.2em; color:${isError ? '#dc3545' : '#333'};}</style></head>
+        <body><div class="container"><h1>${title}</h1><p class="message">${message}</p><br><a href="/dashboard">Back to Shop</a></div></body></html>`;
+    return new Response(html, { status: isError ? 400 : 200, headers: { "Content-Type": "text/html" } });
+}
+
+// UPDATED: Dashboard now reads products from KV
 async function handleDashboard(username: string): Promise<Response> {
     const user = await getUserByUsername(username);
     if (!user) return handleLogout(); 
     
-    const coffeePrice = 2000;
-    const teaPrice = 1500;
+    // Get all products from database
+    const products = await getProducts();
+    
+    // Dynamically create product cards
+    const productListHtml = products.map(product => `
+        <div class="item-card">
+            <div class="item-info">
+                <h3>${product.imageUrl.startsWith('http') ? `<img src="${product.imageUrl}" alt="${product.name}" height="40" style="vertical-align:middle; margin-right:10px;">` : product.imageUrl} ${product.name} 
+                    <span class="price">(${product.price} Ks)</span>
+                </h3>
+            </div>
+            <form method="POST" action="/buy" onsubmit="return checkBalance('${product.name}', ${product.price}, ${user.balance});">
+                <input type="hidden" name="item" value="${product.name}">
+                <input type="hidden" name="price" value="${product.price}">
+                <button type="submit" class="buy-btn">Buy Now</button>
+            </form>
+        </div>
+    `).join('');
     
     const html = `
         <!DOCTYPE html><html lang="my"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Shop Dashboard</title>
-        <style>
-            ${globalStyles}
-            .balance-box{background-color:#e6f7ff; padding:15px; border-radius:5px; margin-bottom:20px;} .balance-amount{font-size:2em; color:#007bff; font-weight:bold;} 
-            .item-card{border:1px solid #ddd; padding:15px; margin-bottom:15px; border-radius:5px; display:flex; justify-content:space-between; align-items:center;} 
-            .item-info h3{margin-top:0; color:#555; font-size:1.2em;} .price{font-weight:bold; color:#28a745; margin-left:10px;} 
-            .buy-btn{background-color:#28a745; color:white; border:none; padding:10px 15px; border-radius:5px; cursor:pointer;} 
-            .nav-links{display:flex; justify-content:space-between; margin-top:20px;}
-        </style>
+        <style>${globalStyles} .balance-box{background-color:#e6f7ff; padding:15px; border-radius:5px; margin-bottom:20px;} .balance-amount{font-size:2em; color:#007bff; font-weight:bold;} .item-card{border:1px solid #ddd; padding:15px; margin-bottom:15px; border-radius:5px; display:flex; justify-content:space-between; align-items:center;} .item-info h3{margin-top:0; color:#555; font-size:1.2em;} .price{font-weight:bold; color:#28a745; margin-left:10px;} .buy-btn{background-color:#28a745; color:white; border:none; padding:10px 15px; border-radius:5px; cursor:pointer;} .nav-links{display:flex; justify-content:space-between; margin-top:20px;}</style>
         </head>
-        <body>
-            <div class="container">
-                <h1>Welcome, ${user.username}!</h1>
-                <div class="balance-box"><span>Current Balance:</span><div class="balance-amount">${user.balance} Ks</div></div>
-                <h2>🛒 Shop Items:</h2>
-                
-                <div class="item-card">
-                    <div class="item-info"><h3>☕ Coffee <span class="price">(${coffeePrice} Ks)</span></h3></div>
-                    <form action="/buy" method="POST" onsubmit="return confirm('Are you sure you want to buy Coffee for ${coffeePrice} Ks?');">
-                        <input type="hidden" name="item" value="Coffee"><input type="hidden" name="price" value="${coffeePrice}">
-                        <button type="submit" class="buy-btn">Buy Now</button>
-                    </form>
-                </div>
-                
-                <div class="item-card">
-                    <div class="item-info"><h3>🍵 Tea <span class="price">(${teaPrice} Ks)</span></h3></div>
-                    <form action="/buy" method="POST" onsubmit="return confirm('Are you sure you want to buy Tea for ${teaPrice} Ks?');">
-                        <input type="hidden" name="item" value="Tea"><input type="hidden" name="price" value="${teaPrice}">
-                        <button type="submit" class="buy-btn">Buy Now</button>
-                    </form>
-                </div>
-                
-                <div class="nav-links"><a href="/user-info">My Info</a><a href="/logout" style="color:red;">Logout</a></div>
-            </div>
+        <body><div class="container"><h1>Welcome, ${user.username}!</h1>
+        <div class="balance-box"><span>Current Balance:</span><div class="balance-amount">${user.balance} Ks</div></div>
+        <h2>🛒 Shop Items:</h2>
+        
+        ${products.length > 0 ? productListHtml : '<p>No products available yet. Check back soon!</p>'}
+        
+        <div class="nav-links"><a href="/user-info">My Info</a><a href="/logout" style="color:red;">Logout</a></div></div>
+        
+        <script>
+            function checkBalance(itemName, price, balance) {
+                if (balance < price) {
+                    alert("Insufficient Balance!\\nYou have " + balance + " Ks but need " + price + " Ks.\\nPlease contact admin for a top-up.");
+                    return false; // Stop the form submission
+                }
+                return confirm("Are you sure you want to buy " + itemName + " for " + price + " Ks?");
+            }
+        </script>
         </body></html>`;
     return new Response(html, { headers: { "Content-Type": "text/html" } });
-}
-
-// Function to render a styled message page
-function renderMessagePage(title: string, message: string, isError = false): Response {
-    const borderColor = isError ? "#dc3545" : "#28a745"; // Red for error, Green for success
-    const html = `
-        <!DOCTYPE html><html><head><title>${title}</title><meta name="viewport" content="width=device-width, initial-scale=1">
-        <style>
-            ${globalStyles}
-            .container { text-align: center; border-top: 5px solid ${borderColor}; }
-            .message { font-size: 1.2em; color: ${isError ? '#dc3545' : '#333'}; }
-        </style>
-        </head>
-        <body><div class="container">
-            <h1>${title}</h1>
-            <p class="message">${message}</p>
-            <br>
-            <a href="/dashboard">Back to Shop</a>
-        </div></body></html>`;
-    return new Response(html, { status: isError ? 400 : 200, headers: { "Content-Type": "text/html" } });
 }
 
 // ROUTE: /user-info (UPDATED with Timezone)
@@ -240,55 +250,25 @@ async function handleUserInfoPage(username: string): Promise<Response> {
 
     const transactions = await getTransactions(username);
     
-    // Function to convert UTC string to Myanmar Time string
     function toMyanmarTime(utcString: string): string {
-        try {
-            return new Date(utcString).toLocaleString("en-US", {
-                timeZone: MYANMAR_TIMEZONE, // "Asia/Yangon"
-                year: 'numeric', month: 'numeric', day: 'numeric',
-                hour: 'numeric', minute: 'numeric', hour12: true
-            });
-        } catch (e) {
-            return utcString; // Fallback
-        }
+        try { return new Date(utcString).toLocaleString("en-US", { timeZone: MYANMAR_TIMEZONE, hour12: true }); } 
+        catch (e) { return utcString; }
     }
 
-    // Generate HTML for transaction history
-    const topUpHistory = transactions
-        .filter(t => t.type === 'topup')
-        .map(t => `<li>On ${toMyanmarTime(t.timestamp)}, you received <strong>${t.amount} Ks</strong>.</li>`)
-        .join('');
-        
-    const purchaseHistory = transactions
-        .filter(t => t.type === 'purchase')
-        .map(t => `<li>On ${toMyanmarTime(t.timestamp)}, you bought an item for <strong>${Math.abs(t.amount)} Ks</strong>.</li>`)
-        .join('');
+    const topUpHistory = transactions.filter(t => t.type === 'topup')
+        .map(t => `<li>On ${toMyanmarTime(t.timestamp)}, you received <strong>${t.amount} Ks</strong>.</li>`).join('');
+    const purchaseHistory = transactions.filter(t => t.type === 'purchase')
+        .map(t => `<li>On ${toMyanmarTime(t.timestamp)}, you bought an item for <strong>${Math.abs(t.amount)} Ks</strong>.</li>`).join('');
 
     const html = `
-        <!DOCTYPE html><html lang="my"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>My Info</title>
-        <style>
-            ${globalStyles}
-            .info-item{font-size:1.2em; margin-bottom:10px;} .history{margin-top:20px;} ul{padding-left: 20px;}
-        </style>
-        </head>
-        <body><div class="container">
-            <h1>My User Info</h1>
-            <div class="info-item"><strong>Username:</strong> ${user.username}</div>
-            <div class="info-item"><strong>Balance:</strong> ${user.balance} Ks</div>
-            <p style="font-size:0.9em; color:gray;">(For security, passwords are never shown.)</p>
-            
-            <div class="history">
-                <h2>Top-Up History</h2>
-                ${topUpHistory.length > 0 ? `<ul>${topUpHistory}</ul>` : '<p>You have not received any top-ups yet.</p>'}
-            </div>
-            
-            <div class="history">
-                <h2>Purchase History</h2>
-                ${purchaseHistory.length > 0 ? `<ul>${purchaseHistory}</ul>` : '<p>You have not made any purchases yet.</p>'}
-            </div>
-            
-            <a href="/dashboard">Back to Shop</a>
-        </div></body></html>`;
+        <!DOCTYPE html><html lang="my"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>My Info</title><style>${globalStyles} .info-item{font-size:1.2em; margin-bottom:10px;} .history{margin-top:20px;} ul{padding-left: 20px;}</style></head>
+        <body><div class="container"><h1>My User Info</h1>
+        <div class="info-item"><strong>Username:</strong> ${user.username}</div>
+        <div class="info-item"><strong>Balance:</strong> ${user.balance} Ks</div>
+        <p style="font-size:0.9em; color:gray;">(For security, passwords are never shown.)</p>
+        <div class="history"><h2>Top-Up History</h2>${topUpHistory.length > 0 ? `<ul>${topUpHistory}</ul>` : '<p>You have not received any top-ups yet.</p>'}</div>
+        <div class="history"><h2>Purchase History</h2>${purchaseHistory.length > 0 ? `<ul>${purchaseHistory}</ul>` : '<p>You have not made any purchases yet.</p>'}</div>
+        <a href="/dashboard">Back to Shop</a></div></body></html>`;
     return new Response(html, { headers: { "Content-Type": "text/html" } });
 }
 
@@ -304,10 +284,8 @@ async function handleAuth(req: Request): Promise<Response> {
 
     if (!username || !password) return renderMessagePage("Login Failed", "Missing username or password.", true);
     const user = await getUserByUsername(username);
-    if (!user || !verifyPassword(password, user.passwordHash)) {
-        return renderMessagePage("Login Failed", "Invalid username or password.", true);
-    }
-
+    if (!user || !verifyPassword(password, user.passwordHash)) return renderMessagePage("Login Failed", "Invalid username or password.", true);
+    
     const headers = createSession(username); 
     return new Response("Login successful. Redirecting...", { status: 302, headers });
 }
@@ -332,7 +310,6 @@ async function handleRegister(req: Request): Promise<Response> {
     }
 }
 
-// UPDATED: handleBuy with clearer messages
 async function handleBuy(req: Request, username: string): Promise<Response> {
     const formData = await req.formData();
     const item = formData.get("item")?.toString();
@@ -343,47 +320,28 @@ async function handleBuy(req: Request, username: string): Promise<Response> {
         return renderMessagePage("Error", "Invalid item or price.", true);
     }
 
-    // Pre-check balance for a clearer error message
-    const user = await getUserByUsername(username);
-    if (!user) return handleLogout(); 
-    if (user.balance < price) {
-        const message = `You have ${user.balance} Ks but need ${price} Ks. Please contact admin for a top-up.`;
-        return renderMessagePage("Insufficient Balance", message, true);
-    }
-
-    // Attempt the transaction
+    // Server-side balance check (final security)
     const success = await updateUserBalance(username, -price); 
 
     if (success) {
         await logTransaction(username, -price, "purchase");
-        const newBalance = user.balance - price;
+        const newBalance = (await getUserByUsername(username))?.balance ?? 0;
         const message = `You bought <strong>${item}</strong> for ${price} Ks.<br>Your new balance is <strong>${newBalance} Ks</strong>.`;
         return renderMessagePage("Purchase Successful!", message, false);
     } else {
-        return renderMessagePage("Transaction Failed", "An error occurred (e.g., balance changed during transaction).", true);
+        const user = await getUserByUsername(username);
+        const message = `You have ${user?.balance ?? 0} Ks but need ${price} Ks. Please contact admin for a top-up.`;
+        return renderMessagePage("Insufficient Balance", message, true);
     }
 }
 
-async function handleAdminTopUp(req: Request): Promise<Response> {
-    const url = new URL(req.url);
-    let username, amount, token;
-
-    if (req.method === "POST") {
-        const formData = await req.formData();
-        username = formData.get("name")?.toString();
-        const amountStr = formData.get("amount")?.toString();
-        amount = amountStr ? parseInt(amountStr) : NaN;
-        token = formData.get("token")?.toString();
-    } else { 
-        username = url.searchParams.get("name");
-        const amountStr = url.searchParams.get("amount");
-        amount = amountStr ? parseInt(amountStr) : NaN;
-        token = url.searchParams.get("token");
-    }
-
-    if (token !== ADMIN_TOKEN || ADMIN_TOKEN === "hardcoded_admin_pass") {
-        return renderMessagePage("Error", "Authorization Failed: Invalid Token.", true);
-    }
+// UPDATED: AdminTopUp and AddProduct are now separate handlers
+async function handleAdminTopUp(req: Request, token: string): Promise<Response> {
+    const formData = await req.formData();
+    const username = formData.get("name")?.toString();
+    const amountStr = formData.get("amount")?.toString();
+    const amount = amountStr ? parseInt(amountStr) : NaN;
+    
     if (!username || isNaN(amount) || amount <= 0) {
         return renderMessagePage("Error", "Missing 'name' or invalid 'amount'.", true);
     }
@@ -399,6 +357,24 @@ async function handleAdminTopUp(req: Request): Promise<Response> {
         return renderMessagePage("Error", `Failed to update balance for ${username}. User may not exist.`, true);
     }
 }
+
+// NEW: Handler for adding a product
+async function handleAddProduct(req: Request, token: string): Promise<Response> {
+    const formData = await req.formData();
+    const name = formData.get("name")?.toString();
+    const priceStr = formData.get("price")?.toString();
+    const price = priceStr ? parseInt(priceStr) : NaN;
+    const imageUrl = formData.get("imageUrl")?.toString();
+
+    if (!name || isNaN(price) || price <= 0 || !imageUrl) {
+        return renderMessagePage("Error", "Missing name, price, or image URL.", true);
+    }
+    
+    await addProduct(name, price, imageUrl);
+    
+    return renderMessagePage("Success", `Product '${name}' has been added.`, false);
+}
+
 
 function handleLogout(): Response {
     const headers = new Headers();
@@ -423,13 +399,21 @@ async function handler(req: Request): Promise<Response> {
     if (pathname === "/logout") return handleLogout();
     
     // --- Admin Routes ---
+    const token = url.searchParams.get("token") || (await req.formData().then(f => f.get("token")?.toString()).catch(() => null));
+    
     if (pathname === "/admin/panel") {
-        const token = url.searchParams.get("token");
-        if (token !== ADMIN_TOKEN) return renderMessagePage("Error", "Unauthorized.", true);
+        if (token !== ADMIN_TOKEN) return renderMessagePage("Error", "Unauthorized: Invalid Token.", true);
         return renderAdminPanel(token); 
     }
-    if (pathname === "/admin/topup") {
-        return handleAdminTopUp(req); 
+    
+    if (pathname === "/admin/topup" && req.method === "POST") {
+        if (token !== ADMIN_TOKEN) return renderMessagePage("Error", "Unauthorized: Invalid Token.", true);
+        return handleAdminTopUp(req, token);
+    }
+    
+    if (pathname === "/admin/add_product" && req.method === "POST") {
+        if (token !== ADMIN_TOKEN) return renderMessagePage("Error", "Unauthorized: Invalid Token.", true);
+        return handleAddProduct(req, token);
     }
     
     // --- Protected Routes (Must be logged in) ---
