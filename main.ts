@@ -11,7 +11,7 @@ interface User {
     username: string;
     passwordHash: string;
     balance: number;
-    isBlocked?: boolean; // Keep track of blocked users
+    isBlocked?: boolean; 
 }
 interface Transaction {
     type: "topup" | "purchase";
@@ -59,7 +59,7 @@ async function registerUser(username: string, passwordHash: string): Promise<boo
         username, 
         passwordHash, 
         balance: 0, 
-        isBlocked: false // Default to not blocked
+        isBlocked: false 
     };
     const key = ["users", username];
     const res = await kv.atomic().check({ key, versionstamp: null }).set(key, user).commit();
@@ -73,7 +73,7 @@ async function updateUserBalance(username: string, amountChange: number): Promis
         const user = result.value;
         if (!user) return false; 
         const newBalance = user.balance + amountChange;
-        if (newBalance < 0) return false; 
+        if (newBalance < 0) return false; // Prevent negative balance
         const res = await kv.atomic().check(result).set(key, { ...user, balance: newBalance }).commit();
         if (res.ok) return true; 
     }
@@ -89,19 +89,14 @@ async function resetUserPassword(username: string, newPasswordHash: string): Pro
     return res.ok;
 }
 
-// Function to toggle a user's blocked status
 async function toggleBlockUser(username: string): Promise<string> {
     const key = ["users", username];
     const result = await kv.get<User>(key);
     const user = result.value;
-
     if (!user) return "User not found.";
-    
-    const newStatus = !user.isBlocked; // Flip the status
+    const newStatus = !user.isBlocked;
     user.isBlocked = newStatus;
-    
     const res = await kv.atomic().check(result).set(key, user).commit();
-    
     if (res.ok) {
         return newStatus ? `User '${username}' has been BLOCKED.` : `User '${username}' has been UNBLOCKED.`;
     }
@@ -331,6 +326,7 @@ function renderRegisterForm(req: Request): Response {
     return new Response(html, { headers: HTML_HEADERS });
 }
 
+// UPDATED: Admin Panel now includes User Management
 async function renderAdminPanel(token: string, message: string | null): Promise<Response> {
     let messageHtml = "";
     if (message) messageHtml = `<div class="success-msg">${decodeURIComponent(message)}</div>`;
@@ -389,7 +385,12 @@ async function renderAdminPanel(token: string, message: string | null): Promise<
                 <button type="submit" class="product">Add Product</button></form><hr>
             
             <h2>User Management</h2>
-            <form action="/admin/topup" method="POST"><input type="hidden" name="token" value="${token}"><label>User Name (for Top-Up):</label><input type="text" name="name" required><br><br><label>Amount (Ks):</label><input type="number" name="amount" required><br><br><button type="submit" class="admin">Add Balance</button></form>
+            <form action="/admin/adjust_balance" method="POST">
+                <input type="hidden" name="token" value="${token}">
+                <label>User Name (for Adjust Balance):</label><input type="text" name="name" required><br><br>
+                <label>Amount (Ks):</label><input type="number" name="amount" required placeholder="e.g., 5000 or -500"><br><br>
+                <button type="submit" class="admin">Adjust Balance</button>
+            </form>
             <br>
             <form action="/admin/reset_password" method="POST"><input type="hidden" name="token" value="${token}"><label>User Name (for Reset):</label><input type="text" name="name" required><br><br><label>New Password:</label><input type="text" name="new_password" required><br><br><button type="submit" class="reset">Reset Password</button></form>
             <br>
@@ -515,9 +516,7 @@ async function handleDashboard(user: User): Promise<Response> {
     return new Response(html, { headers: HTML_HEADERS });
 }
 
-// ----------------------------------------------------
-// (!!!!) USER INFO FUNCTION - UI UPDATED (!!!!)
-// ----------------------------------------------------
+// UPDATED: User Info UI (Alignment, Scroll, Inline Redeem, How to Top Up)
 async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
     const transactions = await getTransactions(user.username);
     
@@ -541,7 +540,7 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
         .map(t => `<li class="topup"><span><strong>${t.itemName || 'Top Up'}</strong> <strong>+${formatCurrency(t.amount)} Ks</strong></span><span class="time">${toMyanmarTime(t.timestamp)}</span></li>`).join('');
     
     const purchaseHistory = transactions.filter(t => t.type === 'purchase')
-        .map(t => `<li class="purchase"><span>${t.itemName.includes('Transfer to') ? t.itemName : `Bought <strong>${t.itemName || 'an item'}</strong>`} for <strong>${formatCurrency(Math.abs(t.amount))} Ks</strong></span><span class="time">${toMyanmarTime(t.timestamp)}</span></li>`)
+        .map(t => `<li class="purchase"><span>${t.itemName.includes('Transfer to') ? t.itemName : (t.itemName.includes('Admin Deduction') ? t.itemName : `Bought <strong>${t.itemName || 'an item'}</strong>`)} for <strong>${formatCurrency(Math.abs(t.amount))} Ks</strong></span><span class="time">${toMyanmarTime(t.timestamp)}</span></li>`)
         .join('');
 
     const html = `
@@ -553,7 +552,6 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
             .avatar svg { width: 32px; height: 32px; color: #aaa; }
             .profile-info { flex-grow: 1; }
             .profile-name { font-size: 1.8em; font-weight: 600; color: #333; margin: 0; }
-            .profile-subtext { font-size: 1.1em; color: #555; }
             
             /* Form Box */
             .form-box { margin-bottom: 25px; background: #f9f9f9; padding: 20px; border-radius: 8px; }
@@ -564,7 +562,6 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
             
             .history { margin-top: 25px; }
             .history h2 { border-bottom: 1px solid #eee; padding-bottom: 5px; }
-            /* Scroll Box */
             .history-list { max-height: 250px; overflow-y: auto; background-color: #fcfcfc; border: 1px solid #eee; padding: 10px; border-radius: 8px; }
             .history ul { padding-left: 0; list-style-type: none; margin: 0; }
             .history li { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; padding: 12px; background: #fff; border: 1px solid #eee; border-radius: 8px; border-left-width: 5px; }
@@ -576,7 +573,6 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
             .payment-info { background: #fffbe6; border: 1px solid #ffeeba; border-radius: 8px; padding: 20px; }
             .payment-info h2 { margin-top: 0; }
             .payment-list { padding-left: 0; list-style: none; margin-top: 15px; }
-            /* FIXED: Alignment for Payment */
             .payment-account { display: grid; grid-template-columns: 100px auto; align-items: center; margin-bottom: 12px; font-size: 1.1em; }
             .payment-account strong { font-weight: 600; color: #333; }
             .payment-account .details { display: flex; flex-direction: column; }
@@ -745,26 +741,31 @@ async function handleBuy(formData: FormData, username: string): Promise<Response
     }
 }
 
-async function handleAdminTopUp(formData: FormData): Promise<Response> {
+// UPDATED: Now handles negative amounts for deduction
+async function handleAdminAdjustBalance(formData: FormData): Promise<Response> {
     const username = formData.get("name")?.toString();
     const amountStr = formData.get("amount")?.toString();
     const amount = amountStr ? parseInt(amountStr) : NaN;
     const token = formData.get("token")?.toString();
     const adminBackLink = `/admin/panel?token=${token}`;
     
-    if (!username || isNaN(amount) || amount <= 0) {
-        return renderMessagePage("Error", "Missing 'name' or invalid 'amount'.", true, adminBackLink);
+    if (!username || isNaN(amount) || amount === 0) {
+        return renderMessagePage("Error", "Missing 'name' or invalid 'amount' (cannot be zero).", true, adminBackLink);
     }
 
     const success = await updateUserBalance(username, amount);
 
     if (success) {
-        await logTransaction(username, amount, "topup", "Admin Top-Up"); 
+        const type = amount > 0 ? "topup" : "purchase";
+        const itemName = amount > 0 ? "Admin Top-Up" : "Admin Deduction";
+        await logTransaction(username, amount, type, itemName); 
+        
+        const message = amount > 0 ? "User balance updated!" : "User balance deducted!";
         const headers = new Headers();
-        headers.set("Location", `/admin/panel?token=${token}&message=${encodeURIComponent("User balance updated!")}`);
+        headers.set("Location", `/admin/panel?token=${token}&message=${encodeURIComponent(message)}`);
         return new Response("Redirecting...", { status: 302, headers });
     } else {
-        return renderMessagePage("Error", `Failed to update balance for ${username}. User may not exist.`, true, adminBackLink);
+        return renderMessagePage("Error", `Failed to update balance. User may not exist or operation would result in negative balance.`, true, adminBackLink);
     }
 }
 
@@ -1045,7 +1046,7 @@ async function handler(req: Request): Promise<Response> {
             return renderMessagePage("Error", "Unauthorized: Invalid Token.", true);
         }
 
-        if (pathname === "/admin/topup") return await handleAdminTopUp(formData);
+        if (pathname === "/admin/adjust_balance") return await handleAdminAdjustBalance(formData); // RENAMED
         if (pathname === "/admin/add_product") return await handleAddProduct(formData);
         if (pathname === "/admin/update_product") return await handleUpdateProduct(formData);
         if (pathname === "/admin/delete_product") return await handleDeleteProduct(formData);
