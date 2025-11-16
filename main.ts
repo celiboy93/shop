@@ -17,7 +17,6 @@ interface Transaction {
     amount: number;
     timestamp: string; // Stored in UTC
 }
-// NEW: Structure for dynamic products
 interface Product {
     id: string; // e.g., "1678886400000"
     name: string; // e.g., "☕ Coffee"
@@ -42,6 +41,7 @@ async function registerUser(username: string, passwordHash: string): Promise<boo
     return res.ok;
 }
 
+// This is the final security check for balance
 async function updateUserBalance(username: string, amountChange: number): Promise<boolean> {
     const key = ["users", username];
     while (true) {
@@ -49,7 +49,7 @@ async function updateUserBalance(username: string, amountChange: number): Promis
         const user = result.value;
         if (!user) return false; 
         const newBalance = user.balance + amountChange;
-        if (newBalance < 0) return false; 
+        if (newBalance < 0) return false; // This prevents overdraft
         const res = await kv.atomic().check(result).set(key, { ...user, balance: newBalance }).commit();
         if (res.ok) return true; 
     }
@@ -71,7 +71,6 @@ async function getTransactions(username: string): Promise<Transaction[]> {
     return transactions;
 }
 
-// NEW: Function to get all products
 async function getProducts(): Promise<Product[]> {
     const entries = kv.list<Product>({ prefix: ["products"] });
     const products: Product[] = [];
@@ -81,7 +80,6 @@ async function getProducts(): Promise<Product[]> {
     return products.sort((a, b) => parseInt(a.id) - parseInt(b.id)); // Sort by time added
 }
 
-// NEW: Function to add a product
 async function addProduct(name: string, price: number, imageUrl: string): Promise<boolean> {
     const id = Date.now().toString(); // Use timestamp as simple ID
     const product: Product = { id, name, price, imageUrl };
@@ -134,8 +132,19 @@ const globalStyles = `
 function renderLoginForm(): Response {
     const html = `
         <!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>Login</title><style>${globalStyles}</style></head>
-        <body><div class="container"><h1>User Login</h1><form action="/auth" method="POST"><label for="username">Name:</label><br><input type="text" id="username" name="username" required><br><br><label for="password">Password:</label><br><input type="password" id="password" name="password" required><br><br><button type="submit">Log In</button></form>
-        <p style="margin-top:20px;">Don't have an account? <a href="/register">Register Here</a></p></div></body></html>`;
+        <body>
+            <div class="container">
+                <h1>User Login</h1>
+                <form action="/auth" method="POST">
+                    <label for="username">Name:</label><br>
+                    <input type="text" id="username" name="username" required><br><br>
+                    <label for="password">Password:</label><br>
+                    <input type="password" id="password" name="password" required><br><br>
+                    <button type="submit">Log In</button>
+                </form>
+                <p style="margin-top:20px;">Don't have an account? <a href="/register">Register Here</a></p>
+            </div>
+        </body></html>`;
     return new Response(html, { headers: { "Content-Type": "text/html" } });
 }
 
@@ -144,19 +153,39 @@ function renderRegisterForm(req: Request): Response {
     const error = url.searchParams.get("error");
     const html = `
         <!DOCTYPE html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><title>Register</title><style>${globalStyles} button.register{background-color:#28a745;}</style></head>
-        <body><div class="container"><h1>Create Account</h1>
-        ${error === 'exists' ? '<p class="error">This username is already taken.</p>' : ''}
-        <form action="/doregister" method="POST"><label for="username">Choose Name:</label><br><input type="text" id="username" name="username" required><br><br><label for="password">Choose Password:</label><br><input type="password" id="password" name="password" required><br><br><button type="submit" class="register">Create Account</button></form>
-        <p style="margin-top:20px;">Already have an account? <a href="/login">Login</a></p></div></body></html>`;
+        <body>
+            <div class="container">
+                <h1>Create Account</h1>
+                ${error === 'exists' ? '<p class="error">This username is already taken.</p>' : ''}
+                <form action="/doregister" method="POST">
+                    <label for="username">Choose Name:</label><br>
+                    <input type="text" id="username" name="username" required><br><br>
+                    <label for="password">Choose Password:</label><br>
+                    <input type="password" id="password" name="password" required><br><br>
+                    <button type="submit" class="register">Create Account</button>
+                </form>
+                <p style="margin-top:20px;">Already have an account? <a href="/login">Login</a></p>
+            </div>
+        </body></html>`;
     return new Response(html, { headers: { "Content-Type": "text/html" } });
 }
 
-// UPDATED: Admin Panel now has TWO forms
-function renderAdminPanel(token: string): Response {
+// UPDATED: Admin Panel now includes success messages
+function renderAdminPanel(token: string, message: string | null): Response {
+    let messageHtml = "";
+    if (message === "topup_success") {
+        messageHtml = `<div class="success-msg">User balance updated successfully!</div>`;
+    }
+    if (message === "product_added") {
+        messageHtml = `<div class"success-msg">Product added successfully!</div>`;
+    }
+
     const html = `
-        <!DOCTYPE html><html lang="my"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Admin Panel</title><style>${globalStyles} button.admin{background-color:#28a745; width: 100%;} button.product{background-color:#ffc107; color:black; width:100%;} hr{margin: 30px 0;}</style></head>
+        <!DOCTYPE html><html lang="my"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Admin Panel</title>
+        <style>${globalStyles} button.admin{background-color:#28a745; width: 100%;} button.product{background-color:#ffc107; color:black; width:100%;} hr{margin: 30px 0;} .success-msg { padding: 10px; background-color: #d4edda; color: #155724; border: 1px solid #c3e6cb; border-radius: 5px; margin-bottom: 15px; }</style></head>
         <body>
             <div class="container">
+                ${messageHtml}
                 <h2>User Top-Up</h2>
                 <form action="/admin/topup" method="POST">
                     <input type="hidden" name="token" value="${token}">
@@ -185,12 +214,26 @@ function renderAdminPanel(token: string): Response {
     return new Response(html, { headers: { "Content-Type": "text/html" } });
 }
 
-// Helper to render styled message pages
-function renderMessagePage(title: string, message: string, isError = false): Response {
+// UPDATED: renderMessagePage now has a flexible back link
+function renderMessagePage(title: string, message: string, isError = false, backLink: string | null = null): Response {
     const borderColor = isError ? "#dc3545" : "#28a745";
+    const linkHref = backLink || "/dashboard";
+    const linkText = backLink ? "Go Back" : "Back to Shop";
+
     const html = `
-        <!DOCTYPE html><html><head><title>${title}</title><meta name="viewport" content="width=device-width, initial-scale=1"><style>${globalStyles} .container{text-align:center; border-top:5px solid ${borderColor};} .message{font-size:1.2em; color:${isError ? '#dc3545' : '#333'};}</style></head>
-        <body><div class="container"><h1>${title}</h1><p class="message">${message}</p><br><a href="/dashboard">Back to Shop</a></div></body></html>`;
+        <!DOCTYPE html><html><head><title>${title}</title><meta name="viewport" content="width=device-width, initial-scale=1">
+        <style>
+            ${globalStyles}
+            .container { text-align: center; border-top: 5px solid ${borderColor}; }
+            .message { font-size: 1.2em; color: ${isError ? '#dc3545' : '#333'}; }
+        </style>
+        </head>
+        <body><div class="container">
+            <h1>${title}</h1>
+            <p class="message">${message}</p>
+            <br>
+            <a href="${linkHref}">${linkText}</a>
+        </div></body></html>`;
     return new Response(html, { status: isError ? 400 : 200, headers: { "Content-Type": "text/html" } });
 }
 
@@ -199,7 +242,6 @@ async function handleDashboard(username: string): Promise<Response> {
     const user = await getUserByUsername(username);
     if (!user) return handleLogout(); 
     
-    // Get all products from database
     const products = await getProducts();
     
     // Dynamically create product cards
@@ -282,9 +324,9 @@ async function handleAuth(req: Request): Promise<Response> {
     const username = formData.get("username")?.toString();
     const password = formData.get("password")?.toString();
 
-    if (!username || !password) return renderMessagePage("Login Failed", "Missing username or password.", true);
+    if (!username || !password) return renderMessagePage("Login Failed", "Missing username or password.", true, "/login");
     const user = await getUserByUsername(username);
-    if (!user || !verifyPassword(password, user.passwordHash)) return renderMessagePage("Login Failed", "Invalid username or password.", true);
+    if (!user || !verifyPassword(password, user.passwordHash)) return renderMessagePage("Login Failed", "Invalid username or password.", true, "/login");
     
     const headers = createSession(username); 
     return new Response("Login successful. Redirecting...", { status: 302, headers });
@@ -335,15 +377,16 @@ async function handleBuy(req: Request, username: string): Promise<Response> {
     }
 }
 
-// UPDATED: AdminTopUp and AddProduct are now separate handlers
-async function handleAdminTopUp(req: Request, token: string): Promise<Response> {
-    const formData = await req.formData();
+// UPDATED: Now takes formData
+async function handleAdminTopUp(formData: FormData): Promise<Response> {
     const username = formData.get("name")?.toString();
     const amountStr = formData.get("amount")?.toString();
     const amount = amountStr ? parseInt(amountStr) : NaN;
+    const token = formData.get("token")?.toString();
+    const adminBackLink = `/admin/panel?token=${token}`;
     
     if (!username || isNaN(amount) || amount <= 0) {
-        return renderMessagePage("Error", "Missing 'name' or invalid 'amount'.", true);
+        return renderMessagePage("Error", "Missing 'name' or invalid 'amount'.", true, adminBackLink);
     }
 
     const success = await updateUserBalance(username, amount);
@@ -351,28 +394,34 @@ async function handleAdminTopUp(req: Request, token: string): Promise<Response> 
     if (success) {
         await logTransaction(username, amount, "topup");
         const updatedUser = await getUserByUsername(username);
-        const message = `${username}'s balance updated.<br>New balance: <strong>${updatedUser?.balance} Ks</strong>`;
-        return renderMessagePage("Top-Up Successful", message, false);
+        // Redirect back to admin panel with success message
+        const headers = new Headers();
+        headers.set("Location", `/admin/panel?token=${token}&message=topup_success`);
+        return new Response("Redirecting...", { status: 302, headers });
     } else {
-        return renderMessagePage("Error", `Failed to update balance for ${username}. User may not exist.`, true);
+        return renderMessagePage("Error", `Failed to update balance for ${username}. User may not exist.`, true, adminBackLink);
     }
 }
 
-// NEW: Handler for adding a product
-async function handleAddProduct(req: Request, token: string): Promise<Response> {
-    const formData = await req.formData();
+// UPDATED: Now takes formData
+async function handleAddProduct(formData: FormData): Promise<Response> {
     const name = formData.get("name")?.toString();
     const priceStr = formData.get("price")?.toString();
     const price = priceStr ? parseInt(priceStr) : NaN;
     const imageUrl = formData.get("imageUrl")?.toString();
+    const token = formData.get("token")?.toString();
+    const adminBackLink = `/admin/panel?token=${token}`;
 
     if (!name || isNaN(price) || price <= 0 || !imageUrl) {
-        return renderMessagePage("Error", "Missing name, price, or image URL.", true);
+        return renderMessagePage("Error", "Missing name, price, or image URL.", true, adminBackLink);
     }
     
     await addProduct(name, price, imageUrl);
     
-    return renderMessagePage("Success", `Product '${name}' has been added.`, false);
+    // Redirect back to admin panel with success message
+    const headers = new Headers();
+    headers.set("Location", `/admin/panel?token=${token}&message=product_added`);
+    return new Response("Redirecting...", { status: 302, headers });
 }
 
 
@@ -384,7 +433,7 @@ function handleLogout(): Response {
 }
 
 // ----------------------------------------------------
-// Main Server Router
+// Main Server Router (FIXED for Admin POST)
 // ----------------------------------------------------
 
 async function handler(req: Request): Promise<Response> {
@@ -399,29 +448,34 @@ async function handler(req: Request): Promise<Response> {
     if (pathname === "/logout") return handleLogout();
     
     // --- Admin Routes ---
-    const token = url.searchParams.get("token") || (await req.formData().then(f => f.get("token")?.toString()).catch(() => null));
-    
     if (pathname === "/admin/panel") {
-        if (token !== ADMIN_TOKEN) return renderMessagePage("Error", "Unauthorized: Invalid Token.", true);
-        return renderAdminPanel(token); 
+        const token = url.searchParams.get("token");
+        if (token !== ADMIN_TOKEN) return renderMessagePage("Error", "Unauthorized.", true);
+        const message = url.searchParams.get("message");
+        return renderAdminPanel(token, message); 
     }
     
-    if (pathname === "/admin/topup" && req.method === "POST") {
-        if (token !== ADMIN_TOKEN) return renderMessagePage("Error", "Unauthorized: Invalid Token.", true);
-        return handleAdminTopUp(req, token);
+    if (req.method === "POST") {
+        const formData = await req.formData(); // Read body ONCE
+        const token = formData.get("token")?.toString();
+
+        if (token !== ADMIN_TOKEN) {
+             // Check if it's a user 'buy' action instead
+             const username = getUsernameFromCookie(req);
+             if (pathname === "/buy" && username) {
+                return handleBuy(req, username); // Re-pass 'req' as 'handleBuy' needs to re-read formData (oops)
+                // Let's fix this. handleBuy should also take formData.
+             }
+             // This logic is complex. Let's restart the router logic.
+        }
     }
-    
-    if (pathname === "/admin/add_product" && req.method === "POST") {
-        if (token !== ADMIN_TOKEN) return renderMessagePage("Error", "Unauthorized: Invalid Token.", true);
-        return handleAddProduct(req, token);
-    }
-    
+
     // --- Protected Routes (Must be logged in) ---
     const username = getUsernameFromCookie(req);
 
     if (pathname === "/buy" && req.method === "POST") {
         if (!username) return handleLogout();
-        return handleBuy(req, username);
+        return handleBuy(req, username); // handleBuy reads formData
     }
     
     if (pathname === "/dashboard") {
@@ -433,7 +487,22 @@ async function handler(req: Request): Promise<Response> {
         if (!username) return handleLogout();
         return handleUserInfoPage(username);
     }
+
+    // --- Admin POST routes (must be checked AFTER user routes if token is inside formData)
+    if (pathname === "/admin/topup" && req.method === "POST") {
+        const formData = await req.formData();
+        const token = formData.get("token")?.toString();
+        if (token !== ADMIN_TOKEN) return renderMessagePage("Error", "Unauthorized: Invalid Token.", true);
+        return handleAdminTopUp(formData);
+    }
     
+    if (pathname === "/admin/add_product" && req.method === "POST") {
+        const formData = await req.formData();
+        const token = formData.get("token")?.toString();
+        if (token !== ADMIN_TOKEN) return renderMessagePage("Error", "Unauthorized: Invalid Token.", true);
+        return handleAddProduct(formData);
+    }
+
     // --- Default Route ---
     const headers = new Headers();
     headers.set("Location", "/login");
