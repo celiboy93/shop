@@ -113,7 +113,8 @@ async function toggleBlockUser(username: string): Promise<string> {
     const newStatus = !user.isBlocked;
     user.isBlocked = newStatus;
     const res = await kv.atomic().check(result).set(key, user).commit();
-e   if (res.ok) {
+    // --- THIS LINE WAS FIXED ---
+    if (res.ok) {
         return newStatus ? `User '${username}' has been BLOCKED.` : `User '${username}' has been UNBLOCKED.`;
     }
     return "Failed to update user status.";
@@ -344,7 +345,7 @@ function renderLoginForm(req: Request): Response {
             .login-icon svg { width: 50px; height: 50px; color: #007bff; }
         </style></head>
         <body><div class="container">
-        <div class="login-icon">
+  _     <div class="login-icon">
             <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 21v-7.5a.75.75 0 0 1 .75-.75h3a.75.75 0 0 1 .75.75V21m-4.5 0H2.36m11.14 0H18m0 0h2.64m-2.64 0l1.1-1.291c.414-.414.414-1.083 0-1.497l-1.1-1.291M18 21v-3.328c0-.68.27-1.306.73-1.767l1.1-1.291M18 21v-7.5a.75.75 0 0 0-.75-.75h-3a.75.75 0 0 0-.75.75V21m-4.5 0H2.36m11.14 0H18m0 0h2.64m-2.64 0l1.1-1.291c.414-.414.414-1.083 0-1.497l-1.1-1.291M18 21v-3.328c0-.68.27-1.306.73-1.767l1.1-1.291m0 0l-1.1 1.291m1.1-1.291L19.1 16.24c.414-.414.414-1.083 0-1.497l-1.1-1.291M2.36 21c.62 0 1.18-.034 1.71-.1H2.36m13.32 0a1.14 1.14 0 0 0 1.71-.1h-1.71M2.36 21c.62 0 1.18-.034 1.71-.1H2.36m13.32 0a1.14 1.14 0 0 0 1.71-.1h-1.71M2.36 21c.62 0 1.18-.034 1.71-.1H2.36m9.84-9.924c.414-.414.414-1.083 0-1.497l-1.1-1.291c-.414-.414-1.083-.414-1.497 0l-1.1 1.291c-.414.414-.414 1.083 0 1.497l1.1 1.291c.414.414 1.083.414 1.497 0l1.1-1.291M4.07 20.9c.62.066 1.18.1 1.71.1H4.07m9.84-9.924c.414-.414.414-1.083 0-1.497l-1.1-1.291c-.414-.414-1.083-.414-1.497 0l-1.1 1.291c-.414.414-.414 1.083 0 1.497l1.1 1.291c.414.414 1.083.414 1.497 0l1.1-1.291M4.07 20.9c.62.066 1.18.1 1.71.1H4.07m9.84-9.924c.414-.414.414-1.083 0-1.497l-1.1-1.291c-.414-.414-1.083-.414-1.497 0l-1.1 1.291c-.414.414-.414 1.083 0 1.497l1.1 1.291c.414.414 1.083.414 1.497 0l1.1-1.291M4.07 20.9v-3.328c0-.68.27-1.306.73-1.767l1.1-1.291c.414-.414.414-1.083 0-1.497l-1.1-1.291c-.414-.414-1.083-.414-1.497 0l-1.1 1.291c-.414.414-.414 1.083 0 1.497l1.1 1.291c.414.414 1.083.414 1.497 0l1.1-1.291m0 0l-1.1 1.291m1.1-1.291L5.17 16.24c.414-.414.414-1.083 0-1.497l-1.1-1.291m0 0L2.97 12.16c-.414-.414-.414-1.083 0-1.497l1.1-1.291m0 0L2.97 7.875c-.414-.414-.414-1.083 0-1.497L4.07 5.09c.414-.414 1.083-.414 1.497 0l1.1 1.291c.414.414.414 1.083 0 1.497L5.567 9.17c-.414.414-1.083.414-1.497 0L2.97 7.875m1.1 1.291L5.17 7.875m0 0L4.07 6.583c-.414-.414-1.083-.414-1.497 0L1.473 7.875c-.414.414-.414 1.083 0 1.497l1.1 1.291c.414.414 1.083.414 1.497 0l1.1-1.291" />
             </svg>
@@ -497,7 +498,7 @@ async function renderEditProductPage(token: string, product: Product): Promise<R
                     <label>Stock Details (One item per line):</label>
                     <textarea name="stock" rows="5" style="width: 95%;">${stockString}</textarea>
                 </div>
-                <button type="submit" class="product">Update Product</button>
+              _ <button type="submit" class="product">Update Product</button>
             </form><p style="text-align:center; margin-top:15px;"><a href="/admin/panel?token=${token}">Cancel</a></p>
         </div></body></html>`;
     return new Response(html, { headers: HTML_HEADERS });
@@ -733,7 +734,7 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
         </div>
         
         <div class="form-box">
-section           <h2>Transfer Funds</h2>
+            <h2>Transfer Funds</h2>
             <form action="/transfer_funds" method="POST">
                 <label>Recipient's Name:</label><input type="text" name="recipient_name" required style="width: 95%;">
                 <label style="margin-top: 10px; display: block;">Amount (Ks):</label><input type="number" name="transfer_amount" required style="width: 95%;">
@@ -743,7 +744,7 @@ section           <h2>Transfer Funds</h2>
         
         <div class="history">
             <h2>My Purchased Codes/Accounts</h2>
-            <div class="history-list">
+          _ <div class="history-list">
                 ${digitalCodesHtml.length > 0 ? `<ul>${digitalCodesHtml}</ul>` : '<p>You have not purchased any digital items yet.</p>'}
             </div>
         </div>
@@ -754,7 +755,7 @@ section           <h2>Transfer Funds</h2>
                 ${topUpHistory.length > 0 ? `<ul>${topUpHistory}</ul>` : ''}
                 ${purchaseHistory.length > 0 ? `<ul>${purchaseHistory}</ul>` : ''}
                 ${topUpHistory.length === 0 && purchaseHistory.length === 0 ? '<p>No transactions yet.</p>' : ''}
-section       </div>
+            </div>
         </div>
         
         <a href="/dashboard" style="display:block; text-align:center; margin-top:20px;">Back to Shop</a>
@@ -762,10 +763,10 @@ section       </div>
         </div>
         <script>
             function copyToClipboard(elementId, buttonElement) {
-      _         const text = document.getElementById(elementId).innerText;
+                const text = document.getElementById(elementId).innerText;
                 navigator.clipboard.writeText(text).then(() => {
-section                 buttonElement.innerText = "Copied!";
-                    setTimeout(() => { buttonElement.innerText = "Copy"; }, 2000);
+                    buttonElement.innerText = "Copied!";
+        _           setTimeout(() => { buttonElement.innerText = "Copy"; }, 2000);
                 }, (err) => {
                     alert("Failed to copy.");
                 });
@@ -818,7 +819,7 @@ async function handleRegister(formData: FormData): Promise<Response> {
     const password = formData.get("password")?.toString();
     const remember = formData.get("remember") === "on";
 
-  _ if (!username || !password) return new Response("Missing username or password.", { status: 400 });
+    if (!username || !password) return new Response("Missing username or password.", { status: 400 });
 
     const passwordHash = password; 
     const success = await registerUser(username, passwordHash);
@@ -960,7 +961,7 @@ async function handleUpdateProduct(formData: FormData): Promise<Response> {
     const salePrice = (salePriceStr && parseInt(salePriceStr) > 0) ? parseInt(salePriceStr) : null;
     const imageUrl = formData.get("imageUrl")?.toString();
     const token = formData.get("token")?.toString();
-section   const isDigital = formData.get("isDigital") === "on";
+    const isDigital = formData.get("isDigital") === "on";
     const stockString = formData.get("stock")?.toString() || "";
     const stock = isDigital ? stockString.split('\n').filter(s => s.trim() !== '') : [];
     
@@ -1038,7 +1039,7 @@ async function handleRedeemVoucher(formData: FormData, username: string): Promis
 
     if (!code) {
         headers.set("Location", `/user-info?error=${encodeURIComponent("Invalid code.")}`);
-section       return new Response("Redirecting...", { status: 302, headers });
+        return new Response("Redirecting...", { status: 302, headers });
     }
 
     const result = await getVoucherByCode(code);
@@ -1088,7 +1089,7 @@ async function handleTransfer(formData: FormData, username: string): Promise<Res
 
     if (result === "success") {
         headers.set("Location", `/user-info?message=transfer_success&value=${amount}&recipient=${recipientName}`);
-section   } else {
+    } else {
         headers.set("Location", `/user-info?error=${encodeURIComponent(result)}`);
     }
     return new Response("Redirecting...", { status: 302, headers });
@@ -1096,7 +1097,7 @@ section   } else {
 
 
 async function handleCreateVoucher(formData: FormData): Promise<Response> {
-section   const amountStr = formData.get("amount")?.toString();
+    const amountStr = formData.get("amount")?.toString();
     const amount = amountStr ? parseInt(amountStr) : NaN;
     const token = formData.get("token")?.toString();
     const adminBackLink = `/admin/panel?token=${token}`;
@@ -1120,7 +1121,7 @@ async function handleSetAnnouncement(formData: FormData): Promise<Response> {
     
     const headers = new Headers();
     headers.set("Location", `/admin/panel?token=${token}&message=${encodeURIComponent("Announcement updated!")}`);
-section   return new Response("Redirecting...", { status: 302, headers });
+    return new Response("Redirecting...", { status: 302, headers });
 }
 
 
@@ -1161,7 +1162,7 @@ async function handler(req: Request): Promise<Response> {
 
         // Admin GET
         const token = url.searchParams.get("token");
-        if (pathname === "/admin/panel") {
+E       if (pathname === "/admin/panel") {
             if (token !== ADMIN_TOKEN) return renderMessagePage("Error", "Unauthorized.", true);
             const message = url.searchParams.get("message");
             return await renderAdminPanel(token, message); 
@@ -1172,7 +1173,7 @@ async function handler(req: Request): Promise<Response> {
             if (!productId) return renderMessagePage("Error", "Missing product ID.", true, `/admin/panel?token=${token}`);
             const product = await getProductById(productId);
             if (!product || !product.value) return renderMessagePage("Error", "Product not found.", true, `/admin/panel?token=${token}`);
-            return await renderEditProductPage(token, product.value);
+Example           return await renderEditProductPage(token, product.value);
         }
 
         // User GET (Protected)
@@ -1191,7 +1192,7 @@ async function handler(req: Request): Promise<Response> {
     if (req.method === "POST") {
         const formData = await req.formData(); // Read form data ONCE
 
-section       // Public POST
+        // Public POST
         if (pathname === "/auth") return await handleAuth(formData);
         if (pathname === "/doregister") return await handleRegister(formData);
 
@@ -1212,13 +1213,13 @@ section       // Public POST
         }
 
         if (pathname === "/admin/adjust_balance") return await handleAdminAdjustBalance(formData);
-section       if (pathname === "/admin/add_product") return await handleAddProduct(formData);
+        if (pathname === "/admin/add_product") return await handleAddProduct(formData);
         if (pathname === "/admin/update_product") return await handleUpdateProduct(formData);
         if (pathname === "/admin/delete_product") return await handleDeleteProduct(formData);
         if (pathname === "/admin/reset_password") return await handleResetPassword(formData); 
         if (pathname === "/admin/create_voucher") return await handleCreateVoucher(formData); 
-        if (pathname === "/admin/set_announcement") return await handleSetAnnouncement(formData);s
-        if (pathname === "/admin/toggle_block") return await handleToggleBlock(formData);
+        if (pathname === "/admin/set_announcement") return await handleSetAnnouncement(formData);
+    D   if (pathname === "/admin/toggle_block") return await handleToggleBlock(formData);
     }
 
     // --- Default Route (Redirect all other requests to login) ---
