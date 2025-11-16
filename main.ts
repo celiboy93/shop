@@ -303,7 +303,7 @@ function renderLoginForm(req: Request): Response {
     let errorHtml = "";
     if (error === 'invalid') errorHtml = '<p class="error">Invalid username or password. Please try again.</p>';
     if (error === 'missing') errorHtml = '<p class="error">Please enter both username and password.</p>';
-    if (error === 'blocked') errorHtml = '<p class="error">Your account has been suspended by the admin.</p>'; // NEW
+    if (error === 'blocked') errorHtml = '<p class="error">Your account has been suspended by the admin.</p>';
 
     const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Login</title><style>${globalStyles}</style></head>
         <body><div class="container"><h1>User Login</h1>${errorHtml} 
@@ -427,7 +427,6 @@ function renderMessagePage(title: string, message: string, isError = false, back
     return new Response(html, { status: isError ? 400 : 200, headers: HTML_HEADERS });
 }
 
-// UPDATED: Dashboard now shows Sale Prices
 async function handleDashboard(user: User): Promise<Response> {
     const products = await getProducts();
     const announcement = await getAnnouncement(); 
@@ -516,7 +515,9 @@ async function handleDashboard(user: User): Promise<Response> {
     return new Response(html, { headers: HTML_HEADERS });
 }
 
-// UPDATED: User Info UI (Alignment, Scroll, Inline Redeem, How to Top Up)
+// ----------------------------------------------------
+// (!!!!) USER INFO FUNCTION - UI UPDATED (!!!!)
+// ----------------------------------------------------
 async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
     const transactions = await getTransactions(user.username);
     
@@ -528,7 +529,7 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
 
     let messageHtml = "";
     if (message === "redeem_success") messageHtml = `<div class="success-msg">Success! ${formatCurrency(parseInt(value || "0"))} Ks was added to your balance.</div>`;
-    if (message === "transfer_success") messageHtml = `<div class"success-msg">Success! You sent ${formatCurrency(parseInt(value || "0"))} Ks to ${recipient}.</div>`;
+    if (message === "transfer_success") messageHtml = `<div class="success-msg">Success! You sent ${formatCurrency(parseInt(value || "0"))} Ks to ${recipient}.</div>`;
     if (error) messageHtml = `<div class="error" style="margin-top: 15px;">${decodeURIComponent(error)}</div>`;
 
     function toMyanmarTime(utcString: string): string {
@@ -551,10 +552,8 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
             .avatar { width: 60px; height: 60px; border-radius: 50%; background-color: #eee; margin-right: 15px; display: flex; justify-content: center; align-items: center; overflow: hidden; }
             .avatar svg { width: 32px; height: 32px; color: #aaa; }
             .profile-info { flex-grow: 1; }
-            /* FIXED: Alignment */
-            .profile-grid { display: grid; grid-template-columns: 90px auto; align-items: center; } 
-            .profile-label { font-size: 1.2em; font-weight: 600; color: #333; }
-            .profile-name { font-size: 1.2em; color: #555; }
+            .profile-name { font-size: 1.8em; font-weight: 600; color: #333; margin: 0; }
+            .profile-subtext { font-size: 1.1em; color: #555; }
             
             /* Form Box */
             .form-box { margin-bottom: 25px; background: #f9f9f9; padding: 20px; border-radius: 8px; }
@@ -595,9 +594,7 @@ async function handleUserInfoPage(req: Request, user: User): Promise<Response> {
                 </svg>
             </div>
             <div class="profile-info">
-                <div class="profile-grid">
-                    <span class="profile-label">Username:</span> <span class="profile-name">${user.username}</span>
-                </div>
+                <h1 class="profile-name">${user.username}</h1>
             </div>
         </div>
         
@@ -1033,13 +1030,13 @@ async function handler(req: Request): Promise<Response> {
         if (pathname === "/doregister") return await handleRegister(formData);
 
         // User 'Buy' & 'Redeem' POST (Protected)
-        const user = await authenticateUser(req);
+        const user = await authenticateUser(req); // Check auth AND block status
         if (user) {
             if (pathname === "/buy") return await handleBuy(formData, user.username);
             if (pathname === "/redeem_voucher") return await handleRedeemVoucher(formData, user.username); 
             if (pathname === "/transfer_funds") return await handleTransfer(formData, user.username); 
         } else if (pathname === "/buy" || pathname === "/redeem_voucher" || pathname === "/transfer_funds") {
-            return handleLogout(); // Not logged in, redirect
+            return handleLogout(); // Not logged in or blocked, redirect
         }
 
         // Admin POST (Protected)
